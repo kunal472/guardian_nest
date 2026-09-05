@@ -1,0 +1,90 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  USER
+  RESPONDER
+  ADMIN
+}
+
+enum MlSensitivity {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum TriggerType {
+  MANUAL_SOS
+  AUDIO_SCREAM
+  DEVICE_SNATCH
+  DEAD_MAN_SWITCH
+}
+
+enum IncidentStatus {
+  ACTIVE
+  DISPATCHED
+  RESOLVED
+  FALSE_ALARM
+}
+
+model User {
+  id                String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  phone             String             @unique @db.VarChar(20)
+  passwordHash      String             @map("password_hash") @db.VarChar(255)
+  name              String             @db.VarChar(255)
+  role              UserRole           @default(USER)
+  isVolunteer       Boolean            @default(false) @map("is_volunteer")
+  mlSensitivity     MlSensitivity      @default(MEDIUM) @map("ml_sensitivity")
+  createdAt         DateTime           @default(now()) @map("created_at") @db.Timestamptz
+  emergencyContacts EmergencyContact[]
+  incidents         Incident[]         @relation("UserIncidents")
+  resolvedIncidents Incident[]         @relation("ResolvedIncidents")
+
+  @@map("users")
+}
+
+model EmergencyContact {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId        String   @map("user_id") @db.Uuid
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  contactName   String   @map("contact_name") @db.VarChar(255)
+  phoneNumber   String   @map("phone_number") @db.VarChar(20)
+  priorityOrder Int      @default(1) @map("priority_order")
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  @@map("emergency_contacts")
+}
+
+model Incident {
+  id                String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId            String                @map("user_id") @db.Uuid
+  user              User                  @relation("UserIncidents", fields: [userId], references: [id], onDelete: Cascade)
+  triggerType       TriggerType           @map("trigger_type")
+  status            IncidentStatus        @default(ACTIVE)
+  startedAt         DateTime              @default(now()) @map("started_at") @db.Timestamptz
+  resolvedAt        DateTime?             @map("resolved_at") @db.Timestamptz
+  resolvedByUserId  String?               @map("resolved_by_user_id") @db.Uuid
+  resolvedByUser    User?                 @relation("ResolvedIncidents", fields: [resolvedByUserId], references: [id])
+  evidenceAudioUrl  String?               @map("evidence_audio_url") @db.VarChar(1024)
+  locationLogs      IncidentLocationLog[]
+
+  @@map("incidents")
+}
+
+model IncidentLocationLog {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  incidentId   String   @map("incident_id") @db.Uuid
+  incident     Incident @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+  lat          Float
+  lng          Float
+  batteryLevel Int?     @map("battery_level")
+  loggedAt     DateTime @default(now()) @map("logged_at") @db.Timestamptz
+
+  @@map("incident_location_logs")
+}
