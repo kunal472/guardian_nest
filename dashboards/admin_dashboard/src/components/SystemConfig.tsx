@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Broadcast, Check, Cpu, Radio, Send, Settings, Sliders } from 'lucide-react';
+import { Check, Cpu, Radio, Send, Settings, Sliders } from 'lucide-react';
 import { io } from 'socket.io-client';
 
 export const SystemConfig: React.FC = () => {

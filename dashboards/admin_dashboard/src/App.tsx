@@ -5,10 +5,12 @@ import {
   CheckCircle,
   Database,
   Layers,
+  LogOut,
   RefreshCw,
   Server,
   Settings,
   Shield,
+  UserCheck,
   Users,
 } from 'lucide-react';
 import {
@@ -23,8 +25,14 @@ import { AnalyticsCards } from './components/AnalyticsCards';
 import { UserTable } from './components/UserTable';
 import { IncidentHistory } from './components/IncidentHistory';
 import { SystemConfig } from './components/SystemConfig';
+import { AdminAuth } from './components/AdminAuth';
+import { getStoredAuth, clearStoredAuth, AdminAuthUser } from './services/auth';
 
 export const App: React.FC = () => {
+  const [currentUser, setCurrentUser] = useState<AdminAuthUser | null>(() => {
+    const auth = getStoredAuth();
+    return auth ? auth.user : null;
+  });
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [incidents, setIncidents] = useState<AdminIncident[]>([]);
   const [activeCount, setActiveCount] = useState<number>(0);
@@ -48,10 +56,12 @@ export const App: React.FC = () => {
   };
 
   useEffect(() => {
-    loadData();
-    const interval = setInterval(loadData, 5000); // 5s GraphQL poll for admin analytics
-    return () => clearInterval(interval);
-  }, []);
+    if (currentUser) {
+      loadData();
+      const interval = setInterval(loadData, 5000); // 5s GraphQL poll for admin analytics
+      return () => clearInterval(interval);
+    }
+  }, [currentUser]);
 
   const handleRoleChange = async (userId: string, newRole: 'USER' | 'RESPONDER' | 'ADMIN') => {
     await fetchGraphQL(UPDATE_USER_ROLE, { userId, role: newRole });
@@ -62,6 +72,21 @@ export const App: React.FC = () => {
     await fetchGraphQL(RESOLVE_INCIDENT, { incidentId, status });
     loadData();
   };
+
+  const handleLogout = () => {
+    clearStoredAuth();
+    setCurrentUser(null);
+  };
+
+  if (!currentUser) {
+    return (
+      <AdminAuth
+        onAuthSuccess={(user) => {
+          setCurrentUser(user);
+        }}
+      />
+    );
+  }
 
   return (
     <div style={{ padding: '24px', maxWidth: '1600px', margin: '0 auto' }}>
@@ -103,7 +128,42 @@ export const App: React.FC = () => {
           </div>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          {/* Admin Officer Profile Badge */}
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '10px',
+              padding: '6px 12px',
+              background: 'rgba(99, 102, 241, 0.1)',
+              border: '1px solid var(--border-active)',
+              borderRadius: '10px',
+            }}
+          >
+            <div
+              style={{
+                width: '28px',
+                height: '28px',
+                borderRadius: '8px',
+                background: 'var(--accent-indigo)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              <UserCheck size={16} color="#fff" />
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
+              <span style={{ fontSize: '13px', fontWeight: 700, color: '#f8fafc' }}>
+                {currentUser.name || 'Admin Officer'}
+              </span>
+              <span style={{ fontSize: '11px', color: '#a5b4fc', fontFamily: 'var(--font-mono)' }}>
+                {currentUser.phone} (LEVEL 3)
+              </span>
+            </div>
+          </div>
+
           <button
             onClick={() => loadData()}
             style={{
@@ -121,6 +181,28 @@ export const App: React.FC = () => {
           >
             <RefreshCw size={14} className={isRefreshing ? 'animate-spin' : ''} />
             <span>Query GraphQL</span>
+          </button>
+
+          <button
+            onClick={handleLogout}
+            title="Sign Out of Admin Command"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '8px 12px',
+              borderRadius: '8px',
+              background: 'rgba(244, 63, 94, 0.12)',
+              border: '1px solid rgba(244, 63, 94, 0.3)',
+              color: '#fda4af',
+              cursor: 'pointer',
+              fontSize: '12px',
+              fontWeight: 600,
+              transition: 'background 0.2s',
+            }}
+          >
+            <LogOut size={14} />
+            <span>Sign Out</span>
           </button>
         </div>
       </header>

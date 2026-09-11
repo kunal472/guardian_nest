@@ -16,6 +16,12 @@ import {
 } from 'react-native';
 import io, { Socket } from 'socket.io-client';
 import { screamDetector, ModelPrediction } from './src/services/screamDetectionService';
+import { CitizenAuth } from './src/components/CitizenAuth';
+import {
+  getStoredCitizenAuth,
+  clearStoredCitizenAuth,
+  CitizenUser,
+} from './src/services/authService';
 
 const BACKEND_URL = 'http://localhost:3000';
 
@@ -29,11 +35,21 @@ interface QueuedLocation {
 }
 
 export default function App() {
+  const [currentUser, setCurrentUser] = useState<CitizenUser | null>(() => {
+    const auth = getStoredCitizenAuth();
+    return auth ? auth.user : null;
+  });
+  const [authToken, setAuthToken] = useState<string | null>(() => {
+    const auth = getStoredCitizenAuth();
+    return auth ? auth.token : null;
+  });
+  const [isGuestBypass, setIsGuestBypass] = useState<boolean>(false);
+
   const [isSosActive, setIsSosActive] = useState<boolean>(false);
   const [incidentId, setIncidentId] = useState<string | null>(null);
   const [triggerType, setTriggerType] = useState<TriggerType>('MANUAL_SOS');
   const [responderStatus, setResponderStatus] = useState<string | null>(null);
-  const [isVolunteer, setIsVolunteer] = useState<boolean>(false);
+  const [isVolunteer, setIsVolunteer] = useState<boolean>(currentUser?.isVolunteer ?? false);
   const [nearbyAlert, setNearbyAlert] = useState<any | null>(null);
   const [isStealthMode, setIsStealthMode] = useState<boolean>(false);
   const [calculatorInput, setCalculatorInput] = useState<string>('0');
@@ -58,7 +74,7 @@ export default function App() {
   const [isModelReady, setIsModelReady] = useState<boolean>(false);
 
   const socketRef = useRef<Socket | null>(null);
-  const streamIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const streamIntervalRef = useRef<any>(null);
   const coordsRef = useRef(coords);
   const batteryRef = useRef(batteryLevel);
   const isSosActiveRef = useRef(isSosActive);
@@ -356,7 +372,10 @@ export default function App() {
 
     if (socketRef.current && socketRef.current.connected && !isSimulatedOffline) {
       socketRef.current.emit('distress:triggered', {
-        userId: 'u_victim_mobile_01',
+        userId: currentUser?.id || 'u_victim_mobile_01',
+        userName: currentUser?.name || 'Citizen User',
+        phone: currentUser?.phone || '+1555019888',
+        emergencyContacts: currentUser?.emergencyContacts,
         lat: coords.lat,
         lng: coords.lng,
         triggerType: type,
@@ -381,6 +400,14 @@ export default function App() {
     setShutdownLastGaspNotice(null);
   };
 
+  const handleLogout = () => {
+    clearStoredCitizenAuth();
+    setCurrentUser(null);
+    setAuthToken(null);
+    setIsGuestBypass(false);
+    cancelDistress();
+  };
+
   // Simulate Sudden Device Shutdown / Battery Depletion Kill
   const handleSimulatedDeviceShutdown = () => {
     dispatchPreShutdownLastGasp('MANUAL_POWER_OFF_SIMULATION');
@@ -400,16 +427,16 @@ export default function App() {
       return;
     }
     if (btn === '=') {
-      if (calculatorInput === '9999' || calculatorInput === '1234') {
+      if (calculatorInput === '9999') {
         setIsStealthMode(false);
         setCalculatorInput('0');
-        return;
-      }
-      try {
-        const res = Function(`'use strict'; return (${calculatorInput})`)();
-        setCalculatorInput(String(res));
-      } catch {
-        setCalculatorInput('Error');
+      } else {
+        try {
+          const evalResult = String(Function(`'use strict'; return (${calculatorInput})`)());
+          setCalculatorInput(evalResult);
+        } catch {
+          setCalculatorInput('Error');
+        }
       }
       return;
     }
@@ -417,27 +444,41 @@ export default function App() {
     setCalculatorInput((prev) => (prev === '0' ? btn : prev + btn));
   };
 
-  // Render Simulated Device Powered Off Black Screen
+  // Render Citizen Auth if not authenticated and not in guest test mode
+  if (!currentUser && !isGuestBypass) {
+    return (
+      <CitizenAuth
+        backendUrl={BACKEND_URL}
+        onAuthSuccess={(user, token) => {
+          setCurrentUser(user);
+          setAuthToken(token);
+          if (user.isVolunteer !== undefined) setIsVolunteer(user.isVolunteer);
+        }}
+        onBypassGuestMode={() => setIsGuestBypass(true)}
+      />
+    );
+  }
+
+  // Render Black Screen when simulated power off is active
   if (isDevicePoweredOff) {
     return (
       <SafeAreaView style={styles.poweredOffContainer}>
-        <StatusBar barStyle="light-content" />
+        <StatusBar barStyle="light-content" backgroundColor="#000000" />
         <View style={styles.poweredOffContent}>
-          <Text style={styles.poweredOffEmoji}>⚡📴</Text>
+          <Text style={styles.poweredOffEmoji}>📴</Text>
           <Text style={styles.poweredOffTitle}>DEVICE POWERED OFF</Text>
           <Text style={styles.poweredOffSub}>
-            Emergency SOS was active during shutdown sequence.
+            Operating system shut down. Beacon & location hardware halted.
           </Text>
+
           {shutdownLastGaspNotice && (
             <View style={styles.shutdownNoticeBox}>
               <Text style={styles.shutdownNoticeTitle}>✅ PRE-SHUTDOWN LAST GASP FIRED</Text>
               <Text style={styles.shutdownNoticeText}>{shutdownLastGaspNotice}</Text>
             </View>
           )}
-          <TouchableOpacity
-            style={styles.powerOnBtn}
-            onPress={handleDevicePowerOn}
-          >
+
+          <TouchableOpacity style={styles.powerOnBtn} onPress={handleDevicePowerOn}>
             <Text style={styles.powerOnBtnText}>🔌 Power Device Back On</Text>
           </TouchableOpacity>
         </View>
@@ -445,7 +486,7 @@ export default function App() {
     );
   }
 
-  // Render Stealth Decoy Calculator if active
+  // Render Stealth Decoy Calculator Screen
   if (isStealthMode) {
     return (
       <SafeAreaView style={styles.calcContainer}>
@@ -475,7 +516,7 @@ export default function App() {
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="light-content" />
       <ScrollView contentContainerStyle={styles.scrollContent}>
-        {/* Header */}
+        {/* Top Header & Citizen Profile Bar */}
         <View style={styles.header}>
           <View>
             <Text style={styles.headerTitle}>GUARDIAN EDGE</Text>
@@ -483,13 +524,50 @@ export default function App() {
               {isSosActive ? '🚨 DISTRESS STREAM ACTIVE (1/s)' : 'STANDBY MODE (1/10s)'}
             </Text>
           </View>
-          <TouchableOpacity
-            style={styles.stealthBtn}
-            onPress={() => setIsStealthMode(true)}
-          >
-            <Text style={styles.stealthBtnText}>🕵️ Decoy UI</Text>
-          </TouchableOpacity>
+          
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <TouchableOpacity
+              style={styles.stealthBtn}
+              onPress={() => setIsStealthMode(true)}
+            >
+              <Text style={styles.stealthBtnText}>🕵️ Decoy</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.logoutBtn}
+              onPress={handleLogout}
+            >
+              <Text style={styles.logoutBtnText}>Sign Out</Text>
+            </TouchableOpacity>
+          </View>
         </View>
+
+        {/* Citizen Profile Card */}
+        {currentUser && (
+          <View style={styles.citizenProfileCard}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+              <View style={styles.citizenAvatar}>
+                <Text style={styles.citizenAvatarText}>
+                  {currentUser.name ? currentUser.name.charAt(0).toUpperCase() : 'C'}
+                </Text>
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.citizenName}>{currentUser.name || 'Citizen Officer'}</Text>
+                <Text style={styles.citizenPhone}>
+                  {currentUser.phone} • {currentUser.isVolunteer ? '🤝 Community Volunteer' : 'Citizen Protected'}
+                </Text>
+              </View>
+            </View>
+
+            {currentUser.emergencyContacts && currentUser.emergencyContacts.length > 0 && (
+              <View style={styles.emergencyContactPill}>
+                <Text style={styles.emergencyContactPillText}>
+                  🚨 Primary Relay: {currentUser.emergencyContacts[0].contactName} ({currentUser.emergencyContacts[0].phoneNumber})
+                </Text>
+              </View>
+            )}
+          </View>
+        )}
 
         {/* Critical Last Gasp Alert Banner */}
         {batteryLevel <= 5 && isSosActive && (
@@ -1269,5 +1347,60 @@ const styles = StyleSheet.create({
     fontSize: 11,
     textAlign: 'center',
     marginTop: 20,
+  },
+  logoutBtn: {
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.12)',
+  },
+  logoutBtnText: {
+    color: '#94a3b8',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  citizenProfileCard: {
+    backgroundColor: 'rgba(30, 41, 59, 0.5)',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  citizenAvatar: {
+    width: 34,
+    height: 34,
+    borderRadius: 10,
+    backgroundColor: '#ef4444',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  citizenAvatarText: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: '800',
+  },
+  citizenName: {
+    color: '#f8fafc',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  citizenPhone: {
+    color: '#94a3b8',
+    fontSize: 11,
+    marginTop: 1,
+  },
+  emergencyContactPill: {
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.06)',
+  },
+  emergencyContactPillText: {
+    color: '#38bdf8',
+    fontSize: 11,
+    fontWeight: '600',
   },
 });

@@ -36,11 +36,17 @@ export interface AdminIncident {
 
 export async function fetchGraphQL<T>(query: string, variables: Record<string, any> = {}): Promise<T | null> {
   try {
+    const token = localStorage.getItem('guardian_admin_token');
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    };
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+
     const res = await fetch(GRAPHQL_URL, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers,
       body: JSON.stringify({ query, variables }),
     });
     const json = await res.json();

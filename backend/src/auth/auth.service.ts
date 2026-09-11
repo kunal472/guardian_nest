@@ -25,25 +25,32 @@ export class AuthService {
     const salt = await bcrypt.genSalt(10);
     const passwordHash = await bcrypt.hash(dto.password, salt);
 
-    const user = await this.prisma.user.create({
-      data: {
-        phone: dto.phone,
-        passwordHash,
-        name: dto.name,
-        role: (dto.role as UserRole) || UserRole.USER,
-      },
-      include: {
-        emergencyContacts: true,
-      },
-    });
+    try {
+      const user = await this.prisma.user.create({
+        data: {
+          phone: dto.phone,
+          passwordHash,
+          name: dto.name,
+          role: (dto.role as UserRole) || UserRole.USER,
+        },
+        include: {
+          emergencyContacts: true,
+        },
+      });
 
-    const token = this.generateToken(user.id, user.phone, user.role);
+      const token = this.generateToken(user.id, user.phone, user.role);
 
-    const { passwordHash: _, ...safeUser } = user;
-    return {
-      token,
-      user: safeUser,
-    };
+      const { passwordHash: _, ...safeUser } = user;
+      return {
+        token,
+        user: safeUser,
+      };
+    } catch (error: any) {
+      if (error?.code === 'P2002' || error?.cause?.originalCode === '23505') {
+        throw new ConflictException('A user with this phone number already exists.');
+      }
+      throw error;
+    }
   }
 
   async login(dto: LoginDto) {

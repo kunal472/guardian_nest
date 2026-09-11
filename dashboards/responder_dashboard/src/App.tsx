@@ -3,10 +3,12 @@ import {
   Activity,
   AlertTriangle,
   Flame,
+  LogOut,
   Radio,
   RefreshCw,
   Search,
   Shield,
+  UserCheck,
   Users,
   Wifi,
   WifiOff,
@@ -14,7 +16,6 @@ import {
 import {
   Incident,
   fetchIncidents,
-  loginDemoResponder,
   updateIncidentStatus,
 } from './services/api';
 import { getSocket } from './services/socket';
@@ -22,9 +23,22 @@ import { LiveAlertBanner } from './components/LiveAlertBanner';
 import { IncidentMap } from './components/IncidentMap';
 import { IncidentDetail } from './components/IncidentDetail';
 import { BreadcrumbLog } from './components/BreadcrumbLog';
+import { ResponderAuth } from './components/ResponderAuth';
+import {
+  getStoredResponderAuth,
+  clearStoredResponderAuth,
+  ResponderUser,
+} from './services/auth';
 
 export const App: React.FC = () => {
-  const [token, setToken] = useState<string>('');
+  const [currentUser, setCurrentUser] = useState<ResponderUser | null>(() => {
+    const auth = getStoredResponderAuth();
+    return auth ? auth.user : null;
+  });
+  const [token, setToken] = useState<string>(() => {
+    const auth = getStoredResponderAuth();
+    return auth ? auth.token : '';
+  });
   const [isConnected, setIsConnected] = useState<boolean>(false);
   const [incidents, setIncidents] = useState<Incident[]>([]);
   const [selectedIncident, setSelectedIncident] = useState<Incident | null>(null);
@@ -39,15 +53,12 @@ export const App: React.FC = () => {
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
   const [isLoading, setIsLoading] = useState<boolean>(false);
 
-  // Initialize Auth & Initial Data
+  // Initialize Data when token is available
   useEffect(() => {
-    loginDemoResponder().then((res) => {
-      if (res?.token) {
-        setToken(res.token);
-        loadIncidents(res.token);
-      }
-    });
-  }, []);
+    if (token) {
+      loadIncidents(token);
+    }
+  }, [token]);
 
   const loadIncidents = async (authToken?: string) => {
     const data = await fetchIncidents(authToken || token);
@@ -165,6 +176,26 @@ export const App: React.FC = () => {
     });
   };
 
+  const handleLogout = () => {
+    clearStoredResponderAuth();
+    setCurrentUser(null);
+    setToken('');
+    setIncidents([]);
+    setSelectedIncident(null);
+  };
+
+  if (!currentUser || !token) {
+    return (
+      <ResponderAuth
+        onAuthSuccess={(user, authJwt) => {
+          setCurrentUser(user);
+          setToken(authJwt);
+          loadIncidents(authJwt);
+        }}
+      />
+    );
+  }
+
   const filteredIncidents = incidents.filter((inc) => {
     if (statusFilter === 'ALL') return true;
     return inc.status === statusFilter;
@@ -211,6 +242,41 @@ export const App: React.FC = () => {
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          {/* Responder Profile Pill */}
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '10px',
+              padding: '6px 12px',
+              background: 'rgba(244, 63, 94, 0.12)',
+              border: '1px solid rgba(244, 63, 94, 0.35)',
+              borderRadius: '10px',
+            }}
+          >
+            <div
+              style={{
+                width: '28px',
+                height: '28px',
+                borderRadius: '8px',
+                background: '#f43f5e',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              <UserCheck size={16} color="#fff" />
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
+              <span style={{ fontSize: '13px', fontWeight: 700, color: '#f8fafc' }}>
+                {currentUser.name || 'Field Unit'}
+              </span>
+              <span style={{ fontSize: '11px', color: '#fda4af', fontFamily: 'var(--font-mono)' }}>
+                {currentUser.phone} • {currentUser.isVolunteer ? 'VOLUNTEER' : 'CAD DISPATCH'}
+              </span>
+            </div>
+          </div>
+
           {/* Connection Status Pill */}
           <div
             style={{
@@ -247,8 +313,8 @@ export const App: React.FC = () => {
               boxShadow: '0 4px 12px rgba(239, 68, 68, 0.3)',
             }}
           >
-            <Flame size={15} />
-            <span>Simulate Incoming SOS</span>
+            <Flame size={14} />
+            <span>Simulate Distress</span>
           </button>
 
           <button
@@ -257,15 +323,39 @@ export const App: React.FC = () => {
               display: 'flex',
               alignItems: 'center',
               gap: '6px',
-              padding: '8px 12px',
+              padding: '8px 14px',
               borderRadius: '8px',
-              background: 'rgba(255,255,255,0.05)',
+              background: 'rgba(255, 255, 255, 0.05)',
               border: '1px solid var(--border-color)',
               color: 'var(--text-primary)',
               cursor: 'pointer',
+              fontSize: '12px',
             }}
           >
-            <RefreshCw size={15} />
+            <RefreshCw size={14} className={isLoading ? 'animate-spin' : ''} />
+            <span>Sync</span>
+          </button>
+
+          <button
+            onClick={handleLogout}
+            title="Sign Out of Dispatch Console"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '8px 12px',
+              borderRadius: '8px',
+              background: 'rgba(255, 255, 255, 0.06)',
+              border: '1px solid var(--border-color)',
+              color: 'var(--text-secondary)',
+              cursor: 'pointer',
+              fontSize: '12px',
+              fontWeight: 600,
+              transition: 'all 0.2s',
+            }}
+          >
+            <LogOut size={14} />
+            <span>Sign Out</span>
           </button>
         </div>
       </header>

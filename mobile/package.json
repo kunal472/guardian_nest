@@ -9,20 +9,21 @@
     "web": "expo start --web"
   },
   "dependencies": {
-    "@expo/metro-runtime": "^57.0.11",
-    "expo": "^57.0.14",
+    "@expo/metro-runtime": "~57.0.15",
+    "expo": "~57.0.21",
     "expo-status-bar": "^57.0.1",
     "lucide-react-native": "^1.32.0",
-    "react": "^19.2.8",
-    "react-native": "^0.87.0",
-    "react-native-svg": "^15.15.5",
+    "react": "19.2.3",
+    "react-dom": "19.2.3",
+    "react-native": "0.86.3",
+    "react-native-svg": "15.15.4",
     "react-native-web": "^0.21.2",
     "socket.io-client": "^4.8.3"
   },
   "devDependencies": {
-    "@babel/core": "^8.0.1",
+    "@babel/core": "^7.29.0",
     "@types/react": "^19.2.18",
-    "typescript": "^7.0.2"
+    "typescript": "~6.0.3"
   },
   "private": true
 }
