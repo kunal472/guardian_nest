@@ -40,6 +40,13 @@ import {
   hardwareAudioVaultService,
   AudioVaultState,
 } from './src/services/hardwareAudioVaultService';
+import {
+  twoTierDistressPipeline,
+  PipelineTelemetry,
+} from './src/services/twoTierDistressPipeline';
+import {
+  speakerBiometricsService,
+} from './src/services/speakerBiometricsService';
 
 const BACKEND_URL = 'http://localhost:3000';
 
@@ -93,11 +100,28 @@ export default function App() {
   const [isDevicePoweredOff, setIsDevicePoweredOff] = useState<boolean>(false);
   const [shutdownLastGaspNotice, setShutdownLastGaspNotice] = useState<string | null>(null);
 
+  // Two-Tier On-Device ML Distress Pipeline Telemetry
+  const [pipelineTelemetry, setPipelineTelemetry] = useState<PipelineTelemetry>({
+    isPipelineActive: true,
+    tier1Status: 'spotting',
+    tier2Status: 'idle',
+    yamnetConfidence: 0,
+    targetClass: null,
+    wakeWordDetected: null,
+    transcript: null,
+    distressIntent: null,
+    verificationLatencyMs: 0,
+    speakerBiometrics: null,
+    ringBufferFill: 0,
+    ringBufferSeconds: 0,
+    lastEventTimestamp: null,
+  });
+
   // Acoustic Scream ML States
   const [isMlListening, setIsMlListening] = useState<boolean>(false);
   const [latestMlPrediction, setLatestMlPrediction] = useState<ModelPrediction | null>(null);
   const [mlSensitivityThreshold, setMlSensitivityThreshold] = useState<number>(0.80);
-  const [isModelReady, setIsModelReady] = useState<boolean>(false);
+  const [isModelReady, setIsModelReady] = useState<boolean>(true);
 
   // 30-Second Audio Evidence Vault State
   const [audioVault, setAudioVault] = useState<AudioVaultState>({
@@ -118,19 +142,30 @@ export default function App() {
   const isSosActiveRef = useRef(isSosActive);
   const incidentIdRef = useRef(incidentId);
 
+  // Subscribe to Two-Tier On-Device ML Pipeline
+  useEffect(() => {
+    twoTierDistressPipeline.setEmergencyCallback((type, metadata) => {
+      console.warn(`[TWO-TIER ML PIPELINE] Emergency escalated via ${metadata.origin}:`, metadata);
+      triggerDistress(type);
+    });
+
+    const unsub = twoTierDistressPipeline.subscribe((telemetry) => {
+      setPipelineTelemetry(telemetry);
+    });
+
+    twoTierDistressPipeline.startPipeline();
+
+    return () => {
+      unsub();
+    };
+  }, []);
+
   // Subscribe to 30s Hardware Audio Vault Service
   useEffect(() => {
     const unsub = hardwareAudioVaultService.subscribe((state) => {
       setAudioVault(state);
     });
     return unsub;
-  }, []);
-
-  // Initialize ML Model Placeholder
-  useEffect(() => {
-    screamDetector.loadModel().then((ready) => {
-      setIsModelReady(ready);
-    });
   }, []);
 
   // Toggle Live AudioWorklet ML Inference Loop
@@ -715,57 +750,154 @@ export default function App() {
           </TouchableOpacity>
         </View>
 
-        {/* Acoustic Scream ML Model Architecture Card */}
+        {/* Two-Tier On-Device ML Distress Pipeline Dashboard */}
         <View style={styles.card}>
           <View style={styles.rowBetween}>
-            <View>
-              <Text style={styles.cardTitle}>Edge ML Scream Detector</Text>
+            <View style={{ flex: 1, paddingRight: 8 }}>
+              <Text style={styles.cardTitle}>Two-Tier Edge ML Distress Pipeline</Text>
               <Text style={styles.cardDesc}>
-                Model Engine: {isModelReady ? 'Ready for Weights Drop-in' : 'Initializing...'}
+                100% Offline On-Device Neural Spotter & Verification Pipeline
               </Text>
             </View>
-            <View style={[styles.modelStatusBadge, isModelReady && styles.modelStatusBadgeReady]}>
-              <Text style={styles.modelStatusBadgeText}>{isModelReady ? 'MODEL LOADED' : 'UNLOADED'}</Text>
+            <View style={[styles.modelStatusBadge, pipelineTelemetry.isPipelineActive && styles.modelStatusBadgeReady]}>
+              <Text style={styles.modelStatusBadgeText}>
+                {pipelineTelemetry.isPipelineActive ? '🟢 T1+T2 ARMED' : 'OFFLINE'}
+              </Text>
             </View>
           </View>
 
-          {/* Live AudioWorklet Inference Analyzer */}
-          <View style={styles.mlStreamBox}>
+          {/* Tier 1: Always-On Low-Power Spotters & Ring Buffer */}
+          <View style={{ marginTop: 10, padding: 12, borderRadius: 8, backgroundColor: 'rgba(255, 255, 255, 0.03)', borderWidth: 1, borderColor: 'rgba(255, 255, 255, 0.08)' }}>
             <View style={styles.rowBetween}>
-              <Text style={styles.metaLabel}>Acoustic Stream Analysis:</Text>
-              <Text style={[styles.metaValue, isMlListening ? { color: '#ef4444' } : { color: '#64748b' }]}>
-                {isMlListening ? '🎙️ LISTENING (AudioWorklet)' : 'Mic Idle'}
+              <Text style={{ fontSize: 12, fontWeight: '700', color: '#38bdf8' }}>
+                TIER 1: Always-On Neural Spotters (16kHz PCM)
+              </Text>
+              <Text style={{ fontSize: 11, color: pipelineTelemetry.tier1Status === 'spotting' ? '#10b981' : '#f59e0b', fontWeight: '700' }}>
+                {pipelineTelemetry.tier1Status === 'spotting' ? '⚡ SPOTTING' : pipelineTelemetry.tier1Status === 'triggered' ? '🚨 TRIGGERED' : 'IDLE'}
               </Text>
             </View>
 
-            {isMlListening && latestMlPrediction && (
-              <View style={{ marginTop: 6 }}>
-                <View style={styles.rowBetween}>
-                  <Text style={styles.metaLabel}>Confidence Score:</Text>
-                  <Text style={[styles.metaValue, latestMlPrediction.isScream ? { color: '#ef4444', fontWeight: '900' } : { color: '#06b6d4' }]}>
-                    {(latestMlPrediction.confidence * 100).toFixed(1)}% ({latestMlPrediction.label})
-                  </Text>
-                </View>
+            <View style={[styles.rowBetween, { marginTop: 6 }]}>
+              <Text style={styles.metaLabel}>Spotter A (YAMNet AudioSet):</Text>
+              <Text style={[styles.metaValue, pipelineTelemetry.yamnetConfidence > 0.6 ? { color: '#ef4444', fontWeight: '800' } : { color: '#94a3b8' }]}>
+                {pipelineTelemetry.targetClass ? `${pipelineTelemetry.targetClass} (${(pipelineTelemetry.yamnetConfidence * 100).toFixed(0)}%)` : 'Scream #11 / Yell #9 / Cry #12'}
+              </Text>
+            </View>
 
-                {/* Meter Bar */}
-                <View style={styles.meterTrack}>
-                  <View
-                    style={[
-                      styles.meterFill,
-                      { width: `${latestMlPrediction.confidence * 100}%` },
-                      latestMlPrediction.isScream && styles.meterFillAlert,
-                    ]}
-                  />
-                </View>
+            <View style={styles.rowBetween}>
+              <Text style={styles.metaLabel}>Spotter B (Porcupine Keyword):</Text>
+              <Text style={[styles.metaValue, pipelineTelemetry.wakeWordDetected ? { color: '#a855f7', fontWeight: '800' } : { color: '#94a3b8' }]}>
+                {pipelineTelemetry.wakeWordDetected ? `"${pipelineTelemetry.wakeWordDetected}" Spotted` : '"Help" / "Emergency" / "Guardian"'}
+              </Text>
+            </View>
+
+            {/* 5s Circular Audio Ring Buffer Meter */}
+            <View style={{ marginTop: 8 }}>
+              <View style={styles.rowBetween}>
+                <Text style={styles.metaLabel}>5s Circular Ring Buffer (Pre/Post Context):</Text>
+                <Text style={[styles.metaValue, { color: '#38bdf8' }]}>
+                  {pipelineTelemetry.ringBufferSeconds.toFixed(1)}s / 5.0s (80,000 samples)
+                </Text>
+              </View>
+              <View style={[styles.meterTrack, { marginTop: 4 }]}>
+                <View
+                  style={[
+                    styles.meterFill,
+                    {
+                      width: `${pipelineTelemetry.ringBufferFill}%`,
+                      backgroundColor: '#38bdf8',
+                    },
+                  ]}
+                />
+              </View>
+            </View>
+          </View>
+
+          {/* Speaker Biometrics & Owner Voice Filter */}
+          <View style={{ marginTop: 8, padding: 10, borderRadius: 8, backgroundColor: 'rgba(168, 85, 247, 0.08)', borderWidth: 1, borderColor: 'rgba(168, 85, 247, 0.2)' }}>
+            <View style={styles.rowBetween}>
+              <Text style={{ fontSize: 11, fontWeight: '700', color: '#d8b4fe' }}>
+                👤 Speaker Biometrics & Owner Voice Filter
+              </Text>
+              <Text style={{ fontSize: 10, fontWeight: '700', color: pipelineTelemetry.speakerBiometrics?.isMatch ? '#34d399' : pipelineTelemetry.speakerBiometrics ? '#f87171' : '#94a3b8' }}>
+                {pipelineTelemetry.speakerBiometrics?.isMatch
+                  ? `OWNER VERIFIED (${(pipelineTelemetry.speakerBiometrics.similarity * 100).toFixed(0)}%)`
+                  : pipelineTelemetry.speakerBiometrics
+                  ? `REJECTED (${(pipelineTelemetry.speakerBiometrics.similarity * 100).toFixed(0)}%)`
+                  : 'PROFILE ACTIVE (>= 0.72 Cosine)'}
+              </Text>
+            </View>
+            <Text style={{ fontSize: 10, color: '#c084fc', marginTop: 2 }}>
+              Filters bystander keyword triggers while universal scream spotter passes unconditionally.
+            </Text>
+          </View>
+
+          {/* Tier 2: Heavy Whisper Verification & NLP Intent */}
+          <View style={{ marginTop: 8, padding: 12, borderRadius: 8, backgroundColor: 'rgba(239, 68, 68, 0.08)', borderWidth: 1, borderColor: 'rgba(239, 68, 68, 0.2)' }}>
+            <View style={styles.rowBetween}>
+              <Text style={{ fontSize: 12, fontWeight: '700', color: '#f87171' }}>
+                TIER 2: On-Demand Whisper ASR + NLP Intent
+              </Text>
+              <Text style={{ fontSize: 11, fontWeight: '800', color: pipelineTelemetry.tier2Status === 'escalated' ? '#ef4444' : pipelineTelemetry.tier2Status === 'transcribing' ? '#38bdf8' : '#64748b' }}>
+                {pipelineTelemetry.tier2Status === 'transcribing' ? '🎙️ TRANSCRIBING...' : pipelineTelemetry.tier2Status === 'intent_verifying' ? '🧠 INTENT VERIFY...' : pipelineTelemetry.tier2Status === 'escalated' ? '🚨 FULL SOS ESCALATED' : pipelineTelemetry.tier2Status === 'rejected' ? '❌ REJECTED (Bystander)' : 'STANDBY'}
+              </Text>
+            </View>
+
+            {pipelineTelemetry.transcript && (
+              <View style={{ marginTop: 6, padding: 8, borderRadius: 6, backgroundColor: 'rgba(0, 0, 0, 0.4)' }}>
+                <Text style={{ fontSize: 11, color: '#f8fafc', fontStyle: 'italic' }}>
+                  &quot;{pipelineTelemetry.transcript}&quot;
+                </Text>
+                {pipelineTelemetry.distressIntent && (
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 }}>
+                    <Text style={{ fontSize: 10, fontWeight: '800', color: '#ef4444' }}>
+                      INTENT: [{pipelineTelemetry.distressIntent}]
+                    </Text>
+                    <Text style={{ fontSize: 10, color: '#94a3b8' }}>
+                      • Latency: {pipelineTelemetry.verificationLatencyMs}ms
+                    </Text>
+                  </View>
+                )}
               </View>
             )}
+          </View>
+
+          {/* Interactive ML Pipeline Test Controls */}
+          <View style={{ marginTop: 10 }}>
+            <Text style={[styles.metaLabel, { marginBottom: 6 }]}>Test Trigger Simulations:</Text>
+            <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
+              <TouchableOpacity
+                style={[styles.mlPill, { backgroundColor: 'rgba(239, 68, 68, 0.15)', borderColor: '#ef4444' }]}
+                onPress={() => twoTierDistressPipeline.handleScreamSpotterEvent(0.89, 'Scream')}
+              >
+                <Text style={[styles.mlPillText, { color: '#fca5a5' }]}>🗣️ Scream (YAMNet #11)</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.mlPill, { backgroundColor: 'rgba(168, 85, 247, 0.15)', borderColor: '#a855f7' }]}
+                onPress={() => twoTierDistressPipeline.handleWakeWordSpotterEvent('Help Me', true)}
+              >
+                <Text style={[styles.mlPillText, { color: '#d8b4fe' }]}>📢 Wake-Word (Owner)</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.mlPill, { backgroundColor: 'rgba(100, 116, 139, 0.2)', borderColor: '#64748b' }]}
+                onPress={() => twoTierDistressPipeline.handleWakeWordSpotterEvent('Help Me', false)}
+              >
+                <Text style={[styles.mlPillText, { color: '#cbd5e1' }]}>👤 Bystander (Reject)</Text>
+              </TouchableOpacity>
+            </View>
 
             <TouchableOpacity
-              style={[styles.mlToggleBtn, isMlListening && styles.mlToggleBtnActive]}
-              onPress={toggleMlListening}
+              style={{
+                marginTop: 8,
+                paddingVertical: 6,
+                alignItems: 'center',
+              }}
+              onPress={() => twoTierDistressPipeline.resetTelemetry()}
             >
-              <Text style={styles.mlToggleBtnText}>
-                {isMlListening ? '🛑 Stop Audio Detection' : '🎙️ Activate Edge Scream Detection'}
+              <Text style={{ fontSize: 11, color: '#64748b', fontWeight: '600' }}>
+                🔄 Clear Pipeline Telemetry Log
               </Text>
             </TouchableOpacity>
           </View>
