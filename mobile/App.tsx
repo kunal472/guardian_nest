@@ -31,6 +31,11 @@ import {
   BatteryInfo,
   BatteryStateEnum,
 } from './src/services/hardwareBatteryService';
+import {
+  hardwareSnatchService,
+  MotionTelemetry,
+  SnatchSensitivity,
+} from './src/services/hardwareSnatchService';
 
 const BACKEND_URL = 'http://localhost:3000';
 
@@ -66,6 +71,9 @@ export default function App() {
   const [locationAccuracy, setLocationAccuracy] = useState<number | null>(null);
   const [locationSpeed, setLocationSpeed] = useState<number | null>(null);
   const [isHardwareGps, setIsHardwareGps] = useState<boolean>(true);
+  const [isSnatchDetectorActive, setIsSnatchDetectorActive] = useState<boolean>(true);
+  const [motionTelemetry, setMotionTelemetry] = useState<MotionTelemetry | null>(null);
+  const [snatchSensitivity, setSnatchSensitivity] = useState<SnatchSensitivity>('MEDIUM');
   const [pingCount, setPingCount] = useState<number>(0);
   const [deadmanSeconds, setDeadmanSeconds] = useState<number | null>(null);
 
@@ -380,6 +388,28 @@ export default function App() {
       hardwareBatteryService.stopListening();
     };
   }, [isSosActive, lastGaspSent, coords]);
+
+  // High-G Device Snatch Hardware Accelerometer Listener
+  useEffect(() => {
+    if (isDevicePoweredOff || !isSnatchDetectorActive) {
+      hardwareSnatchService.stopListening();
+      return;
+    }
+
+    hardwareSnatchService.setSensitivity(snatchSensitivity);
+    hardwareSnatchService.startListening(
+      () => {
+        triggerDistress('DEVICE_SNATCH');
+      },
+      (telemetry) => {
+        setMotionTelemetry(telemetry);
+      }
+    );
+
+    return () => {
+      hardwareSnatchService.stopListening();
+    };
+  }, [isDevicePoweredOff, isSnatchDetectorActive, snatchSensitivity]);
 
   // Dead Man's Switch Countdown Timer
   useEffect(() => {
@@ -864,24 +894,95 @@ export default function App() {
           </TouchableOpacity>
         </View>
 
-        {/* Simulated Edge ML Triggers */}
+        {/* Hardware Accelerometer Snatch Armor Card */}
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>Simulate Edge Sensor Triggers</Text>
-          <View style={styles.triggerGrid}>
+          <View style={styles.rowBetween}>
+            <Text style={styles.cardTitle}>Device Snatch Armor (Accelerometer)</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              <Text style={{ fontSize: 11, fontWeight: '700', color: isSnatchDetectorActive ? '#10b981' : '#64748b' }}>
+                {isSnatchDetectorActive ? '⚡ 20 Hz ACTIVE' : 'PAUSED'}
+              </Text>
+            </View>
+          </View>
+
+          {motionTelemetry && (
+            <View style={{ marginTop: 8, marginBottom: 12 }}>
+              <View style={styles.rowBetween}>
+                <Text style={styles.metaLabel}>Instantaneous G-Force:</Text>
+                <Text
+                  style={[
+                    styles.metaValue,
+                    motionTelemetry.isSpike
+                      ? { color: '#ef4444', fontWeight: '900' }
+                      : { color: '#38bdf8' },
+                  ]}
+                >
+                  {motionTelemetry.magnitude.toFixed(2)} G {motionTelemetry.isSpike ? '💥 (SNATCH SPIKE!)' : '(Baseline 1.0G)'}
+                </Text>
+              </View>
+
+              <View style={styles.rowBetween}>
+                <Text style={styles.metaLabel}>3-Axis Vector [X, Y, Z]:</Text>
+                <Text style={[styles.metaValue, { fontFamily: 'monospace', fontSize: 11 }]}>
+                  [{motionTelemetry.x.toFixed(2)}, {motionTelemetry.y.toFixed(2)}, {motionTelemetry.z.toFixed(2)}]
+                </Text>
+              </View>
+
+              {/* Real-time Acceleration Bar */}
+              <View style={[styles.meterTrack, { marginTop: 6 }]}>
+                <View
+                  style={[
+                    styles.meterFill,
+                    { width: `${Math.min(100, (motionTelemetry.magnitude / 5.0) * 100)}%` },
+                    motionTelemetry.isSpike && styles.meterFillAlert,
+                  ]}
+                />
+              </View>
+            </View>
+          )}
+
+          {/* Snatch Sensitivity Selector */}
+          <Text style={[styles.metaLabel, { marginBottom: 6 }]}>Snatch Jerk Trigger Threshold:</Text>
+          <View style={{ flexDirection: 'row', gap: 8, marginBottom: 12 }}>
+            {(['LOW', 'MEDIUM', 'HIGH'] as const).map((lvl) => (
+              <TouchableOpacity
+                key={lvl}
+                style={[
+                  styles.mlPill,
+                  snatchSensitivity === lvl && styles.mlPillActive,
+                ]}
+                onPress={() => setSnatchSensitivity(lvl)}
+              >
+                <Text
+                  style={[
+                    styles.mlPillText,
+                    snatchSensitivity === lvl && styles.mlPillTextActive,
+                  ]}
+                >
+                  {lvl} {lvl === 'LOW' ? '(4.2G)' : lvl === 'MEDIUM' ? '(3.2G)' : '(2.2G)'}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+
+          {/* Action Row */}
+          <View style={{ flexDirection: 'row', gap: 10 }}>
             <TouchableOpacity
-              style={styles.triggerBtn}
-              onPress={() => triggerDistress('AUDIO_SCREAM')}
+              style={[styles.simNetBtn, { flex: 1, backgroundColor: 'rgba(239, 68, 68, 0.15)', borderColor: '#ef4444' }]}
+              onPress={() => hardwareSnatchService.simulateSnatchJerk()}
             >
-              <Text style={styles.triggerBtnEmoji}>🗣️</Text>
-              <Text style={styles.triggerBtnText}>Acoustic Scream (YAMNet)</Text>
+              <Text style={[styles.simNetBtnText, { color: '#fda4af' }]}>
+                📱 Simulate Snatch Jerk
+              </Text>
             </TouchableOpacity>
 
             <TouchableOpacity
-              style={styles.triggerBtn}
-              onPress={() => triggerDistress('DEVICE_SNATCH')}
+              style={[styles.simNetBtn, { flex: 1 }]}
+              onPress={() => setIsSnatchDetectorActive(!isSnatchDetectorActive)}
             >
-              <Text style={styles.triggerBtnEmoji}>📱</Text>
-              <Text style={styles.triggerBtnText}>Phone Snatch Jerk</Text>
+              <Text style={styles.simNetBtnText}>
+                {isSnatchDetectorActive ? '🛑 Pause Snatch' : '▶️ Resume Snatch'}
+              </Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -1492,5 +1593,26 @@ const styles = StyleSheet.create({
     color: '#38bdf8',
     fontSize: 11,
     fontWeight: '600',
+  },
+  mlPill: {
+    flex: 1,
+    paddingVertical: 8,
+    borderRadius: 8,
+    backgroundColor: 'rgba(255, 255, 255, 0.04)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+    alignItems: 'center',
+  },
+  mlPillActive: {
+    backgroundColor: 'rgba(168, 85, 247, 0.2)',
+    borderColor: '#a855f7',
+  },
+  mlPillText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#94a3b8',
+  },
+  mlPillTextActive: {
+    color: '#d8b4fe',
   },
 });
