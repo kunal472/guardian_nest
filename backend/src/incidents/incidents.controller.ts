@@ -112,6 +112,11 @@ export class IncidentsController {
     return this.incidentsService.updateStatus(id, status, req.user.id);
   }
 
+  @Post(':id/notify-contacts')
+  async notifyContacts(@Param('id') id: string) {
+    return this.incidentsService.notifyEmergencyContacts(id);
+  }
+
   @Get(':id/audio-presigned-url')
   async getPresignedAudioUrl(@Param('id') id: string) {
     const url = this.incidentsService.generateAudioPresignedUrl(id);

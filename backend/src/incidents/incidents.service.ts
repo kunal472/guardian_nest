@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.service';
+import { SmsService } from '../notifications/sms.service';
 import { CreateIncidentDto } from './dto/create-incident.dto';
 import { IncidentStatus, TriggerType } from '@prisma/client';
 
@@ -9,6 +10,7 @@ export class IncidentsService {
   constructor(
     private prisma: PrismaService,
     private redis: RedisService,
+    private smsService: SmsService,
   ) {}
 
   async createIncident(userId: string, dto: CreateIncidentDto) {
@@ -28,7 +30,14 @@ export class IncidentsService {
       },
       include: {
         user: {
-          select: { id: true, name: true, phone: true },
+          select: {
+            id: true,
+            name: true,
+            phone: true,
+            emergencyContacts: {
+              select: { contactName: true, phoneNumber: true },
+            },
+          },
         },
         locationLogs: true,
       },
@@ -47,6 +56,29 @@ export class IncidentsService {
       startedAt: incident.startedAt,
       activeResponders: [],
     });
+
+    // Autonomous Server-Side Emergency SMS Dispatch to all registered contacts
+    const recipients = incident.user.emergencyContacts.map((c) => ({
+      name: c.contactName,
+      phone: c.phoneNumber,
+    }));
+
+    if (recipients.length > 0) {
+      this.smsService
+        .dispatchEmergencyAlert({
+          incidentId: incident.id,
+          victimName: incident.user.name,
+          victimPhone: incident.user.phone,
+          triggerType: dto.triggerType,
+          lat: dto.lat,
+          lng: dto.lng,
+          batteryLevel: dto.batteryLevel ?? 100,
+          recipients,
+        })
+        .catch((err) => {
+          console.warn('[IncidentsService] Background SMS dispatch error:', err?.message);
+        });
+    }
 
     return incident;
   }
@@ -189,8 +221,40 @@ export class IncidentsService {
     return incident;
   }
 
+  async notifyEmergencyContacts(incidentId: string) {
+    const incident = await this.getIncidentById(incidentId);
+    const userWithContacts = await this.prisma.user.findUnique({
+      where: { id: incident.userId },
+      include: { emergencyContacts: true },
+    });
+
+    const lastLoc = incident.locationLogs?.[incident.locationLogs.length - 1];
+    const recipients = (userWithContacts?.emergencyContacts || []).map((c) => ({
+      name: c.contactName,
+      phone: c.phoneNumber,
+    }));
+
+    const results = await this.smsService.dispatchEmergencyAlert({
+      incidentId,
+      victimName: incident.user?.name || 'Citizen User',
+      victimPhone: incident.user?.phone || '',
+      triggerType: incident.triggerType,
+      lat: lastLoc?.lat || 40.7128,
+      lng: lastLoc?.lng || -74.006,
+      batteryLevel: lastLoc?.batteryLevel ?? 100,
+      recipients,
+    });
+
+    return {
+      incidentId,
+      dispatchedCount: results.length,
+      results,
+    };
+  }
+
   generateAudioPresignedUrl(incidentId: string) {
-    return `https://guardian-evidence-vault.s3.amazonaws.com/${incidentId}/evidence_${Date.now()}.m4a?token=mock_presigned_url_valid_300s`;
+    // Graceful fallback to Fastify local static evidence storage vault
+    return `/uploads/evidence/evidence_${incidentId}.m4a`;
   }
 }
 

@@ -8,6 +8,7 @@ import { VolunteersModule } from './volunteers/volunteers.module';
 import { IncidentsModule } from './incidents/incidents.module';
 import { AppGraphQLModule } from './graphql/graphql.module';
 import { GatewayModule } from './gateway/gateway.module';
+import { NotificationsModule } from './notifications/notifications.module';
 
 @Module({
   imports: [
@@ -23,6 +24,7 @@ import { GatewayModule } from './gateway/gateway.module';
     IncidentsModule,
     AppGraphQLModule,
     GatewayModule,
+    NotificationsModule,
   ],
 })
 export class AppModule {}
