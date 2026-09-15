@@ -1,0 +1,37 @@
+{
+  "model": "Whisper Tiny Quantized",
+  "version": "ggml-tiny-q5_1",
+  "model_size_mb": 39.2,
+  "supported_intents": [
+    {
+      "intent": "PHYSICAL_ASSAULT",
+      "severity": "CRITICAL",
+      "escalate_immediate": true,
+      "patterns": ["stop it", "don't touch me", "let me go", "get off me", "hands off"]
+    },
+    {
+      "intent": "POLICE_SUMMON",
+      "severity": "CRITICAL",
+      "escalate_immediate": true,
+      "patterns": ["call police", "call 911", "call the cops", "dial emergency"]
+    },
+    {
+      "intent": "THREAT_EVASION",
+      "severity": "HIGH",
+      "escalate_immediate": true,
+      "patterns": ["get away", "stay away", "leave me alone", "back off", "don't come near"]
+    },
+    {
+      "intent": "DIRECT_DISTRESS",
+      "severity": "CRITICAL",
+      "escalate_immediate": true,
+      "patterns": ["help me", "somebody help", "help", "save me", "in danger"]
+    },
+    {
+      "intent": "EMERGENCY_MEDICAL",
+      "severity": "CRITICAL",
+      "escalate_immediate": true,
+      "patterns": ["can't breathe", "heart attack", "bleeding", "ambulance", "collapsed"]
+    }
+  ]
+}

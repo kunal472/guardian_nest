@@ -1,0 +1,42 @@
+{
+  "engine": "openWakeWord",
+  "version": "0.6.0",
+  "runtime": "ONNX_WASM_TFLITE",
+  "zero_key": true,
+  "sample_rate": 16000,
+  "chunk_size": 1280,
+  "models": [
+    {
+      "id": "help_me",
+      "keyword": "Help Me",
+      "model_file": "help_me.onnx",
+      "threshold": 0.65,
+      "cooldown_ms": 3000,
+      "requires_owner_verification": true
+    },
+    {
+      "id": "emergency",
+      "keyword": "Emergency",
+      "model_file": "emergency.onnx",
+      "threshold": 0.65,
+      "cooldown_ms": 3000,
+      "requires_owner_verification": true
+    },
+    {
+      "id": "hey_guardian",
+      "keyword": "Hey Guardian",
+      "model_file": "hey_guardian.onnx",
+      "threshold": 0.60,
+      "cooldown_ms": 3000,
+      "requires_owner_verification": true
+    },
+    {
+      "id": "stop",
+      "keyword": "Stop",
+      "model_file": "stop.onnx",
+      "threshold": 0.70,
+      "cooldown_ms": 3000,
+      "requires_owner_verification": true
+    }
+  ]
+}

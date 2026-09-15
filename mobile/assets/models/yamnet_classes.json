@@ -1,0 +1,19 @@
+{
+  "model": "YAMNet AudioSet Classifier",
+  "version": "1.0",
+  "sample_rate": 16000,
+  "input_shape": [15600],
+  "target_distress_indices": [
+    { "index": 11, "name": "Scream", "category": "Acoustic Distress", "threshold": 0.60, "priority": 1 },
+    { "index": 9, "name": "Yell", "category": "Vocal Outcry", "threshold": 0.65, "priority": 2 },
+    { "index": 6, "name": "Shout", "category": "Vocal Outcry", "threshold": 0.65, "priority": 2 },
+    { "index": 12, "name": "Crying, sobbing", "category": "Acoustic Distress", "threshold": 0.60, "priority": 1 },
+    { "index": 13, "name": "Groan", "category": "Pain/Suffering", "threshold": 0.70, "priority": 3 },
+    { "index": 14, "name": "Grunt", "category": "Physical Struggle", "threshold": 0.70, "priority": 3 },
+    { "index": 420, "name": "Glass breaking", "category": "Environmental Hazard", "threshold": 0.75, "priority": 3 },
+    { "index": 426, "name": "Gunshot, gunfire", "category": "Violent Threat", "threshold": 0.60, "priority": 1 },
+    { "index": 432, "name": "Explosion", "category": "Violent Threat", "threshold": 0.60, "priority": 1 }
+  ],
+  "classes_count": 521,
+  "format": "tflite_quantized_int8"
+}

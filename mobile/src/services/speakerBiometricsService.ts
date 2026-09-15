@@ -20,14 +20,27 @@ export interface VerificationResult {
   isEnrolled: boolean;
 }
 
+export type ProfileChangeListener = (profile: SpeakerProfile | null) => void;
+
 const STORAGE_KEY = 'guardian_speaker_biometrics_profile';
 
 class SpeakerBiometricsService {
   private activeProfile: SpeakerProfile | null = null;
   private matchThreshold: number = 0.72; // Default Cosine Similarity threshold
+  private profileListeners: Set<ProfileChangeListener> = new Set();
 
   constructor() {
     this.loadEnrolledProfile();
+  }
+
+  public subscribeProfile(listener: ProfileChangeListener): () => void {
+    this.profileListeners.add(listener);
+    listener(this.activeProfile);
+    return () => this.profileListeners.delete(listener);
+  }
+
+  private notifyProfileChanged(): void {
+    this.profileListeners.forEach((l) => l(this.activeProfile));
   }
 
   private loadEnrolledProfile(): void {
@@ -143,6 +156,7 @@ class SpeakerBiometricsService {
       // Fallback
     }
 
+    this.notifyProfileChanged();
     return profile;
   }
 
@@ -158,6 +172,7 @@ class SpeakerBiometricsService {
     } catch {
       // Fallback
     }
+    this.notifyProfileChanged();
   }
 
   /**

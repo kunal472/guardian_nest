@@ -6,7 +6,8 @@
     "start": "expo start",
     "android": "expo start --android",
     "ios": "expo start --ios",
-    "web": "expo start --web"
+    "web": "expo start --web",
+    "download:models": "curl -L -o ./assets/models/ggml-tiny.en.bin https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en.bin && curl -L -o ./assets/models/yamnet.tflite https://storage.googleapis.com/tfhub-modules/google/lite-model/yamnet/tflite/1.tflite"
   },
   "dependencies": {
     "@expo/metro-runtime": "~57.0.15",

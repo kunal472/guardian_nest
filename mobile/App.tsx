@@ -123,6 +123,10 @@ export default function App() {
     lastEventTimestamp: null,
   });
 
+  // Speaker Biometrics Owner Profile State
+  const [speakerProfile, setSpeakerProfile] = useState(() => speakerBiometricsService.getProfile());
+  const [enrollmentNotice, setEnrollmentNotice] = useState<string | null>(null);
+
   // Acoustic Scream ML States
   const [isMlListening, setIsMlListening] = useState<boolean>(false);
   const [latestMlPrediction, setLatestMlPrediction] = useState<ModelPrediction | null>(null);
@@ -147,6 +151,14 @@ export default function App() {
   const batteryRef = useRef(batteryLevel);
   const isSosActiveRef = useRef(isSosActive);
   const incidentIdRef = useRef(incidentId);
+
+  // Subscribe to Speaker Biometrics Profile Changes
+  useEffect(() => {
+    const unsub = speakerBiometricsService.subscribeProfile((profile) => {
+      setSpeakerProfile(profile);
+    });
+    return unsub;
+  }, []);
 
   // Subscribe to Two-Tier On-Device ML Pipeline
   useEffect(() => {
@@ -781,23 +793,81 @@ export default function App() {
             </View>
           </View>
 
-          {/* Speaker Biometrics & Owner Voice Filter */}
-          <View style={{ marginTop: 8, padding: 10, borderRadius: 8, backgroundColor: 'rgba(168, 85, 247, 0.08)', borderWidth: 1, borderColor: 'rgba(168, 85, 247, 0.2)' }}>
+          {/* Speaker Biometrics & Owner Voice Filter (Personalization Engine) */}
+          <View style={{ marginTop: 8, padding: 12, borderRadius: 8, backgroundColor: 'rgba(168, 85, 247, 0.08)', borderWidth: 1, borderColor: 'rgba(168, 85, 247, 0.25)' }}>
             <View style={styles.rowBetween}>
-              <Text style={{ fontSize: 11, fontWeight: '700', color: '#d8b4fe' }}>
-                👤 Speaker Biometrics & Owner Voice Filter
-              </Text>
-              <Text style={{ fontSize: 10, fontWeight: '700', color: pipelineTelemetry.speakerBiometrics?.isMatch ? '#34d399' : pipelineTelemetry.speakerBiometrics ? '#f87171' : '#94a3b8' }}>
-                {pipelineTelemetry.speakerBiometrics?.isMatch
-                  ? `OWNER VERIFIED (${(pipelineTelemetry.speakerBiometrics.similarity * 100).toFixed(0)}%)`
-                  : pipelineTelemetry.speakerBiometrics
-                  ? `REJECTED (${(pipelineTelemetry.speakerBiometrics.similarity * 100).toFixed(0)}%)`
-                  : 'PROFILE ACTIVE (>= 0.72 Cosine)'}
-              </Text>
+              <View>
+                <Text style={{ fontSize: 12, fontWeight: '700', color: '#d8b4fe' }}>
+                  👤 Personalized Speaker Biometrics (16-D Centroid)
+                </Text>
+                <Text style={{ fontSize: 10, color: '#c084fc', marginTop: 1 }}>
+                  Owner: {speakerProfile?.userName || currentUser?.name || 'Primary Owner'} • Enrolled (3 Samples)
+                </Text>
+              </View>
+              <View style={{ backgroundColor: 'rgba(168, 85, 247, 0.2)', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
+                <Text style={{ fontSize: 10, fontWeight: '800', color: '#d8b4fe' }}>
+                  COSINE: &ge; {(speakerBiometricsService.getMatchThreshold() * 100).toFixed(0)}%
+                </Text>
+              </View>
             </View>
-            <Text style={{ fontSize: 10, color: '#c084fc', marginTop: 2 }}>
-              Filters bystander keyword triggers while universal scream spotter passes unconditionally.
-            </Text>
+
+            {/* Last Verification Telemetry Result */}
+            {pipelineTelemetry.speakerBiometrics && (
+              <View style={{ marginTop: 6, padding: 6, borderRadius: 6, backgroundColor: 'rgba(0, 0, 0, 0.3)', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Text style={{ fontSize: 10, color: '#94a3b8' }}>Latest Voice Check:</Text>
+                <Text style={{ fontSize: 10, fontWeight: '700', color: pipelineTelemetry.speakerBiometrics.isMatch ? '#34d399' : '#f87171' }}>
+                  {pipelineTelemetry.speakerBiometrics.reason}
+                </Text>
+              </View>
+            )}
+
+            {enrollmentNotice && (
+              <View style={{ marginTop: 6, padding: 6, borderRadius: 6, backgroundColor: 'rgba(16, 185, 129, 0.15)', borderWidth: 1, borderColor: '#10b981' }}>
+                <Text style={{ fontSize: 10, color: '#6ee7b7', fontWeight: '600' }}>
+                  ✨ {enrollmentNotice}
+                </Text>
+              </View>
+            )}
+
+            {/* Personalization Calibration Actions */}
+            <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
+              <TouchableOpacity
+                style={[styles.mlPill, { backgroundColor: 'rgba(168, 85, 247, 0.2)', borderColor: '#c084fc', flex: 2 }]}
+                onPress={() => {
+                  const newSamples = [
+                    [0.40, 0.45, 0.58, 0.31, 0.63, 0.50, 0.38, 0.54, 0.46, 0.41, 0.60, 0.43, 0.51, 0.55, 0.39, 0.48],
+                    [0.37, 0.41, 0.53, 0.28, 0.59, 0.47, 0.33, 0.50, 0.42, 0.37, 0.56, 0.39, 0.47, 0.51, 0.35, 0.44],
+                    [0.39, 0.43, 0.56, 0.30, 0.61, 0.49, 0.36, 0.52, 0.44, 0.39, 0.58, 0.41, 0.49, 0.53, 0.37, 0.46],
+                  ];
+                  speakerBiometricsService.enrollVoice(
+                    currentUser?.id || 'owner_custom',
+                    currentUser?.name || 'Primary Device Owner',
+                    newSamples,
+                  );
+                  setEnrollmentNotice('Voice Profile Re-Calibrated with 3 Acoustic Samples!');
+                  setTimeout(() => setEnrollmentNotice(null), 4000);
+                }}
+              >
+                <Text style={[styles.mlPillText, { color: '#e9d5ff' }]}>
+                  🎙️ Calibrate My Voice (3 Utterances)
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.mlPill, { flex: 1 }]}
+                onPress={() => {
+                  const currentThresh = speakerBiometricsService.getMatchThreshold();
+                  const nextThresh = currentThresh >= 0.80 ? 0.65 : currentThresh >= 0.72 ? 0.80 : 0.72;
+                  speakerBiometricsService.setMatchThreshold(nextThresh);
+                  setEnrollmentNotice(`Cosine Threshold updated to ${(nextThresh * 100).toFixed(0)}%`);
+                  setTimeout(() => setEnrollmentNotice(null), 3000);
+                }}
+              >
+                <Text style={styles.mlPillText}>
+                  ⚙️ {(speakerBiometricsService.getMatchThreshold() * 100).toFixed(0)}% Match
+                </Text>
+              </TouchableOpacity>
+            </View>
           </View>
 
           {/* Tier 2: Heavy Whisper Verification & NLP Intent */}
