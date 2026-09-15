@@ -15,7 +15,7 @@
     "strictNullChecks": false,
     "noImplicitAny": false,
     "strictBindCallApply": false,
-    "ignoreDeprecations": "6.0",
+    // "ignoreDeprecations": "6.0",
     "forceConsistentCasingInFileNames": false,
     "noFallthroughCasesInSwitch": false
   }

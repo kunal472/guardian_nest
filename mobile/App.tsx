@@ -47,6 +47,12 @@ import {
 import {
   speakerBiometricsService,
 } from './src/services/speakerBiometricsService';
+import {
+  nativeShutdownService,
+} from './src/services/nativeShutdownService';
+import {
+  emergencySmsService,
+} from './src/services/emergencySmsService';
 
 const BACKEND_URL = 'http://localhost:3000';
 
@@ -202,76 +208,37 @@ export default function App() {
     incidentIdRef.current = incidentId;
   }, [incidentId]);
 
+  // Synchronize telemetry with NativeShutdownService
+  useEffect(() => {
+    const contactPhones = currentUser?.emergencyContacts?.map((c) => c.phoneNumber);
+    nativeShutdownService.updateTelemetry(
+      coords.lat,
+      coords.lng,
+      batteryLevel,
+      incidentId,
+      contactPhones,
+      currentUser?.name,
+    );
+  }, [coords, batteryLevel, incidentId, currentUser]);
+
   // Synchronous Pre-Shutdown Last Gasp Dispatcher
   const dispatchPreShutdownLastGasp = (reason: string = 'OS_SHUTDOWN') => {
-    if (!isSosActiveRef.current) return;
-
-    const currentCoords = coordsRef.current;
-    const currentBatt = Math.round(batteryRef.current);
-    const incId = incidentIdRef.current || 'inc_preshutdown';
-
-    console.warn(`[PRE-SHUTDOWN LAST GASP] Firing final GPS fix before process kill (${reason})...`);
-
-    if (socketRef.current?.connected) {
-      socketRef.current.emit('location:update', {
-        incidentId: incId,
-        lat: currentCoords.lat,
-        lng: currentCoords.lng,
-        batteryLevel: currentBatt,
-        isLastGasp: true,
-        isPreShutdown: true,
-        shutdownReason: reason,
-        timestamp: new Date().toISOString(),
-      });
-    }
-
-    if (Platform.OS === 'web' && typeof navigator !== 'undefined' && navigator.sendBeacon) {
-      try {
-        const beaconData = new Blob([
-          JSON.stringify({
-            lat: currentCoords.lat,
-            lng: currentCoords.lng,
-            batteryLevel: currentBatt,
-            isLastGasp: true,
-            isPreShutdown: true,
-          }),
-        ], { type: 'application/json' });
-        navigator.sendBeacon(`${BACKEND_URL}/api/incidents/${incId}/location`, beaconData);
-      } catch (err) {
-        console.warn('Beacon send failed:', err);
-      }
-    }
-
-    setShutdownLastGaspNotice(`Final GPS (${currentCoords.lat.toFixed(5)}, ${currentCoords.lng.toFixed(5)}) dispatched via Pre-Shutdown Beacon.`);
+    const beacon = nativeShutdownService.dispatchPreShutdownBeacon(reason, BACKEND_URL);
+    setShutdownLastGaspNotice(
+      `Final GPS (${beacon.lat.toFixed(5)}, ${beacon.lng.toFixed(5)}) dispatched via Pre-Shutdown Beacon (${beacon.reason}).`
+    );
   };
 
   // OS AppState & Web beforeunload / pagehide Hooks
   useEffect(() => {
-    const subscription = AppState.addEventListener('change', (nextAppState: AppStateStatus) => {
-      if (nextAppState === 'background' || nextAppState === 'inactive') {
-        if (isSosActiveRef.current) {
-          dispatchPreShutdownLastGasp('APP_BACKGROUNDED_OR_TERMINATING');
-        }
-      }
+    nativeShutdownService.startListening((beacon) => {
+      setShutdownLastGaspNotice(
+        `Final GPS (${beacon.lat.toFixed(5)}, ${beacon.lng.toFixed(5)}) dispatched via Pre-Shutdown Beacon (${beacon.reason}).`
+      );
     });
 
-    const handleBeforeUnload = () => {
-      if (isSosActiveRef.current) {
-        dispatchPreShutdownLastGasp('BROWSER_TAB_CLOSE_OR_RELOAD');
-      }
-    };
-
-    if (Platform.OS === 'web' && typeof window !== 'undefined') {
-      window.addEventListener('beforeunload', handleBeforeUnload);
-      window.addEventListener('pagehide', handleBeforeUnload);
-    }
-
     return () => {
-      subscription.remove();
-      if (Platform.OS === 'web' && typeof window !== 'undefined') {
-        window.removeEventListener('beforeunload', handleBeforeUnload);
-        window.removeEventListener('pagehide', handleBeforeUnload);
-      }
+      nativeShutdownService.stopListening();
     };
   }, []);
 
@@ -379,14 +346,15 @@ export default function App() {
     }
   };
 
-  // Smart SMS Fallback Generator
+  // Smart Emergency SMS Intent Fallback
   const triggerSmsFallback = (lat: number, lng: number, batt: number) => {
-    const smsBody = encodeURIComponent(
-      `🚨 GUARDIAN EMERGENCY ALERT: My battery is dying (${batt}%). Last GPS Location: https://maps.google.com/?q=${lat.toFixed(5)},${lng.toFixed(5)} | Incident #${incidentId || 'SOS'}`
-    );
-    const smsUri = `sms:?body=${smsBody}`;
-    Linking.openURL(smsUri).catch((err) => {
-      console.warn('Cannot launch SMS intent:', err);
+    emergencySmsService.dispatchEmergencySms({
+      lat,
+      lng,
+      batteryLevel: batt,
+      incidentId: incidentId || undefined,
+      userName: currentUser?.name || 'Citizen User',
+      recipients: currentUser?.emergencyContacts?.map((c) => c.phoneNumber),
     });
   };
 
