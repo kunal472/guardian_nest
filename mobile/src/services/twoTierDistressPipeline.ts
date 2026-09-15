@@ -79,8 +79,30 @@ class TwoTierDistressPipeline {
     isWebSpeechActive: false,
   };
 
+  private yamnetThreshold: number = 0.60;
+  private openWakeWordThreshold: number = 0.70;
+
   constructor() {
     this.ringBuffer = new AudioRingBuffer(16000, 5); // 16kHz, 5s capacity = 80,000 samples
+  }
+
+  public setDynamicThresholds(yamnetFloor?: number, wakeWordFloor?: number): void {
+    if (yamnetFloor !== undefined && yamnetFloor > 0) {
+      this.yamnetThreshold = yamnetFloor;
+    }
+    if (wakeWordFloor !== undefined && wakeWordFloor > 0) {
+      this.openWakeWordThreshold = wakeWordFloor;
+    }
+    console.log(
+      `[TwoTierPipeline] Dynamic Thresholds Updated: Scream=${this.yamnetThreshold.toFixed(2)}, WakeWord=${this.openWakeWordThreshold.toFixed(2)}`,
+    );
+  }
+
+  public getThresholds(): { yamnetThreshold: number; openWakeWordThreshold: number } {
+    return {
+      yamnetThreshold: this.yamnetThreshold,
+      openWakeWordThreshold: this.openWakeWordThreshold,
+    };
   }
 
   public setEmergencyCallback(cb: EmergencyCallback): void {
@@ -220,7 +242,7 @@ class TwoTierDistressPipeline {
     };
     this.emitState();
 
-    if (confidence >= 0.60) {
+    if (confidence >= this.yamnetThreshold) {
       // Grab 5s contiguous window from circular ring buffer (-2s pre-trigger, +3s post-trigger)
       const audioContext = this.ringBuffer.getPreAndPostTriggerWindow(2, 3);
 

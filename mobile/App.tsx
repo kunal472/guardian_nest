@@ -105,6 +105,7 @@ export default function App() {
   const [lastTransmissionMethod, setLastTransmissionMethod] = useState<string>('Standby');
   const [isDevicePoweredOff, setIsDevicePoweredOff] = useState<boolean>(false);
   const [shutdownLastGaspNotice, setShutdownLastGaspNotice] = useState<string | null>(null);
+  const [dynamicConfigNotice, setDynamicConfigNotice] = useState<string | null>(null);
 
   // Two-Tier On-Device ML Distress Pipeline Telemetry
   const [pipelineTelemetry, setPipelineTelemetry] = useState<PipelineTelemetry>({
@@ -286,6 +287,41 @@ export default function App() {
     socket.on('nearby:broadcast', (alertData: any) => {
       setNearbyAlert(alertData);
     });
+
+    // Dynamic Edge ML & Hardware Config Synchronization over Event Bus
+    const handleConfigBroadcast = (data: any) => {
+      console.log('📡 [EventBus] Dynamic System Config Update Received:', data);
+
+      const scream = data.yamnetScreamThreshold ?? data.newWeights?.scream_confidence;
+      const wakeWord = data.openWakeWordThreshold;
+      const snatchG = data.snatchThresholdG ?? (data.newWeights?.snatch_sensitivity ? data.newWeights.snatch_sensitivity * 4.0 : undefined);
+      const batteryCrit = data.batteryCriticalThreshold;
+
+      if (scream !== undefined) {
+        setMlSensitivityThreshold(scream);
+        screamDetector.setSensitivityThreshold(scream);
+        twoTierDistressPipeline.setDynamicThresholds(scream, wakeWord);
+      } else if (wakeWord !== undefined) {
+        twoTierDistressPipeline.setDynamicThresholds(undefined, wakeWord);
+      }
+
+      if (snatchG !== undefined) {
+        hardwareSnatchService.setCustomThresholdG(snatchG);
+      }
+
+      const summaryParts: string[] = [];
+      if (scream !== undefined) summaryParts.push(`Scream: ${(scream * 100).toFixed(0)}%`);
+      if (wakeWord !== undefined) summaryParts.push(`WakeWord: ${(wakeWord * 100).toFixed(0)}%`);
+      if (snatchG !== undefined) summaryParts.push(`Snatch: ${snatchG.toFixed(1)}G`);
+      if (batteryCrit !== undefined) summaryParts.push(`LastGasp: ${(batteryCrit * 100).toFixed(0)}%`);
+
+      const notice = `🌐 Dynamic Config Synced: ${summaryParts.join(' • ')}`;
+      setDynamicConfigNotice(notice);
+      setTimeout(() => setDynamicConfigNotice(null), 6000);
+    };
+
+    socket.on('events.system.configuration_update', handleConfigBroadcast);
+    socket.on('system:config_update', handleConfigBroadcast);
 
     return () => {
       socket.disconnect();
@@ -683,6 +719,14 @@ export default function App() {
             <Text style={styles.lastGaspSub}>
               Battery at {Math.round(batteryLevel)}%! Final GPS fix pinned & broadcasted to dispatchers.
             </Text>
+          </View>
+        )}
+
+        {/* Dynamic Edge ML Remote Sync Banner */}
+        {dynamicConfigNotice && (
+          <View style={styles.dynamicConfigBanner}>
+            <Text style={styles.dynamicConfigBannerTitle}>⚙️ GLOBAL EDGE ML THRESHOLDS UPDATED</Text>
+            <Text style={styles.dynamicConfigBannerSub}>{dynamicConfigNotice}</Text>
           </View>
         )}
 
@@ -1696,6 +1740,24 @@ const styles = StyleSheet.create({
   },
   shutdownNoticeBannerSub: {
     color: '#cbd5e1',
+    fontSize: 11,
+    marginTop: 2,
+  },
+  dynamicConfigBanner: {
+    backgroundColor: 'rgba(99, 102, 241, 0.2)',
+    borderWidth: 1,
+    borderColor: '#818cf8',
+    borderRadius: 10,
+    padding: 12,
+    marginBottom: 16,
+  },
+  dynamicConfigBannerTitle: {
+    color: '#a5b4fc',
+    fontWeight: '800',
+    fontSize: 13,
+  },
+  dynamicConfigBannerSub: {
+    color: '#e0e7ff',
     fontSize: 11,
     marginTop: 2,
   },

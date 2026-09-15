@@ -80,3 +80,25 @@ export class User {
   @Field(() => [Incident])
   incidents: Incident[];
 }
+
+@ObjectType()
+export class SystemConfigModel {
+  @Field(() => Float)
+  yamnetScreamThreshold: number;
+
+  @Field(() => Float)
+  openWakeWordThreshold: number;
+
+  @Field(() => Float)
+  snatchThresholdG: number;
+
+  @Field(() => Float)
+  batteryCriticalThreshold: number;
+
+  @Field(() => Int)
+  deadmanTimeoutMins: number;
+
+  @Field()
+  updatedAt: string;
+}
+

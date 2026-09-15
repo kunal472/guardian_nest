@@ -121,3 +121,120 @@ body {
   color: #cbd5e1;
   border: 1px solid rgba(148, 163, 184, 0.4);
 }
+
+/* Leaflet Custom Styling & Tactical Radar Markers */
+.leaflet-container {
+  background: #0b111e !important;
+  font-family: var(--font-sans) !important;
+}
+
+.custom-radar-victim-marker {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.victim-pulse-wave {
+  position: absolute;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: rgba(239, 68, 68, 0.35);
+  border: 1.5px solid rgba(239, 68, 68, 0.9);
+  animation: radar-victim-expand 2s ease-out infinite;
+  pointer-events: none;
+}
+
+.victim-pulse-wave-delayed {
+  position: absolute;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: rgba(239, 68, 68, 0.2);
+  border: 1px solid rgba(239, 68, 68, 0.6);
+  animation: radar-victim-expand 2s ease-out infinite 0.75s;
+  pointer-events: none;
+}
+
+.victim-core-pin {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #ef4444;
+  border: 2.5px solid #ffffff;
+  box-shadow: 0 0 16px #ef4444, 0 0 30px rgba(239, 68, 68, 0.8);
+  z-index: 10;
+  position: relative;
+}
+
+.victim-callout-tag {
+  position: absolute;
+  bottom: 22px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(15, 23, 42, 0.92);
+  border: 1px solid rgba(239, 68, 68, 0.6);
+  padding: 3px 8px;
+  border-radius: 6px;
+  color: #fca5a5;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+  pointer-events: none;
+  font-family: var(--font-sans);
+  letter-spacing: 0.3px;
+}
+
+.sentinel-mesh-marker {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+}
+
+.sentinel-core-pin {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #10b981;
+  border: 2px solid #ffffff;
+  box-shadow: 0 0 10px #10b981;
+}
+
+.sentinel-callout-tag {
+  position: absolute;
+  bottom: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(15, 23, 42, 0.88);
+  border: 1px solid rgba(16, 185, 129, 0.5);
+  padding: 2px 6px;
+  border-radius: 4px;
+  color: #6ee7b7;
+  font-size: 10px;
+  font-weight: 600;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.breadcrumb-waypoint-marker {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #f87171;
+  border: 1px solid #ffffff;
+  box-shadow: 0 0 6px rgba(239, 68, 68, 0.8);
+}
+
+@keyframes radar-victim-expand {
+  0% {
+    transform: scale(0.3);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1.6);
+    opacity: 0;
+  }
+}

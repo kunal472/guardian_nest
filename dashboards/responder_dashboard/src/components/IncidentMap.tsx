@@ -1,11 +1,24 @@
-import React, { useEffect, useRef } from 'react';
-import { Crosshair, MapPin, Navigation, Radio, Shield, ZoomIn, ZoomOut } from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react';
+import * as L from 'leaflet';
+import {
+  Compass,
+  Crosshair,
+  Layers,
+  MapPin,
+  Maximize2,
+  Navigation,
+  Radio,
+  Shield,
+  Zap,
+  ZoomIn,
+  ZoomOut,
+} from 'lucide-react';
 import { Incident } from '../services/api';
 
 interface IncidentMapProps {
   incident: Incident | null;
   liveCoordinates: { lat: number; lng: number; batteryLevel?: number } | null;
-  breadcrumbLogs: Array<{ lat: number; lng: number; loggedAt: string }>;
+  breadcrumbLogs: Array<{ lat: number; lng: number; loggedAt: string; batteryLevel?: number }>;
 }
 
 export const IncidentMap: React.FC<IncidentMapProps> = ({
@@ -13,152 +26,292 @@ export const IncidentMap: React.FC<IncidentMapProps> = ({
   liveCoordinates,
   breadcrumbLogs,
 }) => {
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const mapContainerRef = useRef<HTMLDivElement | null>(null);
+  const mapInstanceRef = useRef<L.Map | null>(null);
+  const victimMarkerRef = useRef<L.Marker | null>(null);
+  const breadcrumbLayerRef = useRef<L.Polyline | null>(null);
+  const waypointsGroupRef = useRef<L.LayerGroup | null>(null);
+  const geofenceGroupRef = useRef<L.LayerGroup | null>(null);
+  const meshNodesGroupRef = useRef<L.LayerGroup | null>(null);
+  const tileLayerRef = useRef<L.TileLayer | null>(null);
 
-  const currentLat = liveCoordinates?.lat ?? incident?.locationLogs?.[incident.locationLogs.length - 1]?.lat ?? 40.7128;
-  const currentLng = liveCoordinates?.lng ?? incident?.locationLogs?.[incident.locationLogs.length - 1]?.lng ?? -74.006;
+  const [autoFollow, setAutoFollow] = useState<boolean>(true);
+  const [mapStyle, setMapStyle] = useState<'dark' | 'osm'>('dark');
+  const [showGeofence, setShowGeofence] = useState<boolean>(true);
 
-  // Render tactical grid map canvas
+  const currentLat =
+    liveCoordinates?.lat ??
+    incident?.locationLogs?.[incident.locationLogs.length - 1]?.lat ??
+    40.7128;
+  const currentLng =
+    liveCoordinates?.lng ??
+    incident?.locationLogs?.[incident.locationLogs.length - 1]?.lng ??
+    -74.006;
+
+  // Initialize Leaflet Map
   useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
+    if (!mapContainerRef.current || mapInstanceRef.current) return;
 
-    const width = canvas.width;
-    const height = canvas.height;
-
-    // Background
-    ctx.fillStyle = '#0b111e';
-    ctx.fillRect(0, 0, width, height);
-
-    // Draw tactical grid
-    ctx.strokeStyle = 'rgba(59, 130, 246, 0.08)';
-    ctx.lineWidth = 1;
-    const gridSize = 40;
-    for (let x = 0; x < width; x += gridSize) {
-      ctx.beginPath();
-      ctx.moveTo(x, 0);
-      ctx.lineTo(x, height);
-      ctx.stroke();
-    }
-    for (let y = 0; y < height; y += gridSize) {
-      ctx.beginPath();
-      ctx.moveTo(0, y);
-      ctx.lineTo(width, y);
-      ctx.stroke();
-    }
-
-    const centerX = width / 2;
-    const centerY = height / 2;
-
-    // Draw concentric radar range rings (500m volunteer geofence, 1km, 2km)
-    ctx.strokeStyle = 'rgba(6, 182, 212, 0.2)';
-    ctx.setLineDash([4, 4]);
-    [80, 160, 240].forEach((r, idx) => {
-      ctx.beginPath();
-      ctx.arc(centerX, centerY, r, 0, Math.PI * 2);
-      ctx.stroke();
-
-      ctx.fillStyle = 'rgba(6, 182, 212, 0.5)';
-      ctx.font = '10px JetBrains Mono';
-      ctx.fillText(`${(idx + 1) * 250}m Mesh`, centerX + r - 55, centerY - 8);
+    const map = L.map(mapContainerRef.current, {
+      center: [currentLat, currentLng],
+      zoom: 16,
+      zoomControl: false,
+      attributionControl: false,
     });
-    ctx.setLineDash([]);
 
-    // Draw Breadcrumb Path if logs exist
-    if (breadcrumbLogs.length > 1) {
-      ctx.strokeStyle = 'rgba(239, 68, 68, 0.6)';
-      ctx.lineWidth = 2.5;
-      ctx.beginPath();
+    // Dark matter default tiles (CartoDB)
+    const initialTileUrl =
+      mapStyle === 'dark'
+        ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
+        : 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
 
-      breadcrumbLogs.forEach((log, idx) => {
-        // Calculate offset relative to center
-        const offsetX = (log.lng - currentLng) * 15000;
-        const offsetY = -(log.lat - currentLat) * 15000;
-        const ptX = centerX + offsetX;
-        const ptY = centerY + offsetY;
+    const tileLayer = L.tileLayer(initialTileUrl, {
+      maxZoom: 19,
+      subdomains: 'abcd',
+    }).addTo(map);
 
-        if (idx === 0) ctx.moveTo(ptX, ptY);
-        else ctx.lineTo(ptX, ptY);
+    tileLayerRef.current = tileLayer;
 
-        // Draw intermediate breadcrumb dot
-        ctx.fillStyle = 'rgba(239, 68, 68, 0.4)';
-        ctx.beginPath();
-        ctx.arc(ptX, ptY, 3, 0, Math.PI * 2);
-        ctx.fill();
+    // Create Layer Groups
+    const waypointsGroup = L.layerGroup().addTo(map);
+    const geofenceGroup = L.layerGroup().addTo(map);
+    const meshNodesGroup = L.layerGroup().addTo(map);
+
+    waypointsGroupRef.current = waypointsGroup;
+    geofenceGroupRef.current = geofenceGroup;
+    meshNodesGroupRef.current = meshNodesGroup;
+
+    mapInstanceRef.current = map;
+
+    return () => {
+      map.remove();
+      mapInstanceRef.current = null;
+    };
+  }, []);
+
+  // Update Tile Layer on Style Change
+  useEffect(() => {
+    if (!mapInstanceRef.current || !tileLayerRef.current) return;
+    mapInstanceRef.current.removeLayer(tileLayerRef.current);
+
+    const tileUrl =
+      mapStyle === 'dark'
+        ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
+        : 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
+
+    const newTileLayer = L.tileLayer(tileUrl, {
+      maxZoom: 19,
+      subdomains: 'abcd',
+    }).addTo(mapInstanceRef.current);
+
+    tileLayerRef.current = newTileLayer;
+  }, [mapStyle]);
+
+  // Update Dynamic Overlays (Victim Marker, Geofence, Breadcrumbs, Nearby Sentinels)
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    if (!map) return;
+
+    const victimName = incident?.user?.name || 'Distress Beacon';
+    const batteryBadge =
+      liveCoordinates?.batteryLevel !== undefined
+        ? ` • ${Math.round(liveCoordinates.batteryLevel * 100)}% ⚡`
+        : '';
+
+    // 1. Create or Update Victim Marker with animated radar pulse
+    const victimHtml = `
+      <div class="custom-radar-victim-marker">
+        <div class="victim-pulse-wave"></div>
+        <div class="victim-pulse-wave-delayed"></div>
+        <div class="victim-core-pin"></div>
+        <div class="victim-callout-tag">${victimName}${batteryBadge}</div>
+      </div>
+    `;
+
+    const victimIcon = L.divIcon({
+      html: victimHtml,
+      className: '',
+      iconSize: [48, 48],
+      iconAnchor: [24, 24],
+    });
+
+    if (!victimMarkerRef.current) {
+      victimMarkerRef.current = L.marker([currentLat, currentLng], {
+        icon: victimIcon,
+        zIndexOffset: 1000,
+      }).addTo(map);
+    } else {
+      victimMarkerRef.current.setLatLng([currentLat, currentLng]);
+      victimMarkerRef.current.setIcon(victimIcon);
+    }
+
+    // Auto-pan if autoFollow is active
+    if (autoFollow) {
+      map.panTo([currentLat, currentLng], { animate: true, duration: 0.8 });
+    }
+
+    // 2. Update Breadcrumb Polyline & Waypoints
+    if (breadcrumbLayerRef.current) {
+      map.removeLayer(breadcrumbLayerRef.current);
+      breadcrumbLayerRef.current = null;
+    }
+    if (waypointsGroupRef.current) {
+      waypointsGroupRef.current.clearLayers();
+    }
+
+    const pathPoints: [number, number][] = breadcrumbLogs.map((log) => [log.lat, log.lng]);
+    if (pathPoints.length > 0) {
+      // Add current position to ensure connected trail
+      pathPoints.push([currentLat, currentLng]);
+
+      const polyline = L.polyline(pathPoints, {
+        color: '#ef4444',
+        weight: 3.5,
+        opacity: 0.85,
+        dashArray: '6, 6',
+        lineCap: 'round',
+        lineJoin: 'round',
+      }).addTo(map);
+
+      breadcrumbLayerRef.current = polyline;
+
+      // Add waypoint dots for breadcrumb trail
+      if (waypointsGroupRef.current) {
+        breadcrumbLogs.forEach((log) => {
+          const wpDot = L.circleMarker([log.lat, log.lng], {
+            radius: 3.5,
+            fillColor: '#f87171',
+            fillOpacity: 0.9,
+            color: '#ffffff',
+            weight: 1,
+          });
+          wpDot.bindTooltip(
+            `<span style="font-family: monospace; font-size: 11px;">Ping: ${new Date(
+              log.loggedAt,
+            ).toLocaleTimeString()}</span>`,
+            { direction: 'top', offset: [0, -6] },
+          );
+          waypointsGroupRef.current?.addLayer(wpDot);
+        });
+      }
+    }
+
+    // 3. Update Sentinel 250m / 500m Geofence Rings
+    if (geofenceGroupRef.current) {
+      geofenceGroupRef.current.clearLayers();
+      if (showGeofence) {
+        // 250m inner ring
+        const ring250 = L.circle([currentLat, currentLng], {
+          radius: 250,
+          color: '#06b6d4',
+          weight: 1.5,
+          dashArray: '4, 4',
+          fillColor: '#06b6d4',
+          fillOpacity: 0.05,
+        });
+
+        // 500m Redis GEO geofence ring
+        const ring500 = L.circle([currentLat, currentLng], {
+          radius: 500,
+          color: '#10b981',
+          weight: 1.5,
+          dashArray: '6, 6',
+          fillColor: '#10b981',
+          fillOpacity: 0.03,
+        });
+
+        geofenceGroupRef.current.addLayer(ring250);
+        geofenceGroupRef.current.addLayer(ring500);
+      }
+    }
+
+    // 4. Draw Sentinel Mesh Nodes around victim
+    if (meshNodesGroupRef.current) {
+      meshNodesGroupRef.current.clearLayers();
+
+      const meshNodes = [
+        { lat: currentLat + 0.0018, lng: currentLng - 0.0014, name: 'Volunteer #402', distance: '230m' },
+        { lat: currentLat - 0.0012, lng: currentLng + 0.0022, name: 'Volunteer #119', distance: '310m' },
+        { lat: currentLat + 0.0031, lng: currentLng + 0.0011, name: 'Patrol Car #12', distance: '480m' },
+      ];
+
+      meshNodes.forEach((node) => {
+        const sentinelHtml = `
+          <div class="sentinel-mesh-marker">
+            <div class="sentinel-core-pin"></div>
+            <div class="sentinel-callout-tag">${node.name} (${node.distance})</div>
+          </div>
+        `;
+
+        const sentinelIcon = L.divIcon({
+          html: sentinelHtml,
+          className: '',
+          iconSize: [32, 32],
+          iconAnchor: [16, 16],
+        });
+
+        const sentinelMarker = L.marker([node.lat, node.lng], { icon: sentinelIcon });
+        meshNodesGroupRef.current?.addLayer(sentinelMarker);
       });
-      ctx.stroke();
     }
+  }, [currentLat, currentLng, breadcrumbLogs, incident, liveCoordinates, autoFollow, showGeofence]);
 
-    // Draw Nearby Sentinels / Volunteer Icons (Simulated Mesh nodes)
-    const meshNodes = [
-      { x: centerX - 90, y: centerY + 60, name: 'Volunteer #402' },
-      { x: centerX + 110, y: centerY - 70, name: 'Volunteer #119' },
-      { x: centerX - 50, y: centerY - 100, name: 'Patrol Car #12' },
-    ];
-
-    meshNodes.forEach((node) => {
-      ctx.fillStyle = '#10b981';
-      ctx.beginPath();
-      ctx.arc(node.x, node.y, 5, 0, Math.PI * 2);
-      ctx.fill();
-
-      ctx.fillStyle = '#94a3b8';
-      ctx.font = '10px Inter';
-      ctx.fillText(node.name, node.x + 8, node.y + 3);
-    });
-
-    // Draw Victim Target Indicator at Center
-    if (incident) {
-      // Outer pulse glow
-      const grad = ctx.createRadialGradient(centerX, centerY, 5, centerX, centerY, 35);
-      grad.addColorStop(0, 'rgba(239, 68, 68, 0.8)');
-      grad.addColorStop(1, 'rgba(239, 68, 68, 0)');
-      ctx.fillStyle = grad;
-      ctx.beginPath();
-      ctx.arc(centerX, centerY, 35, 0, Math.PI * 2);
-      ctx.fill();
-
-      // Center marker
-      ctx.fillStyle = '#ef4444';
-      ctx.beginPath();
-      ctx.arc(centerX, centerY, 7, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.strokeStyle = '#ffffff';
-      ctx.lineWidth = 2;
-      ctx.stroke();
-
-      // Crosshairs
-      ctx.strokeStyle = 'rgba(239, 68, 68, 0.7)';
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(centerX - 15, centerY);
-      ctx.lineTo(centerX + 15, centerY);
-      ctx.moveTo(centerX, centerY - 15);
-      ctx.lineTo(centerX, centerY + 15);
-      ctx.stroke();
-
-      // Label
-      ctx.fillStyle = '#f87171';
-      ctx.font = 'bold 12px Inter';
-      ctx.fillText(incident.user?.name || 'Victim', centerX + 16, centerY - 6);
+  // Recenter Handler
+  const handleRecenter = () => {
+    if (mapInstanceRef.current) {
+      mapInstanceRef.current.setView([currentLat, currentLng], 16, { animate: true });
     }
-  }, [currentLat, currentLng, breadcrumbLogs, incident]);
+  };
+
+  const handleZoomIn = () => {
+    mapInstanceRef.current?.zoomIn();
+  };
+
+  const handleZoomOut = () => {
+    mapInstanceRef.current?.zoomOut();
+  };
 
   return (
-    <div className="glass-panel" style={{ padding: '16px', display: 'flex', flexDirection: 'column', height: '100%' }}>
+    <div
+      className="glass-panel"
+      style={{
+        padding: '16px',
+        display: 'flex',
+        flexDirection: 'column',
+        height: '100%',
+        position: 'relative',
+      }}
+    >
       {/* Top Map Toolbar */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          marginBottom: '12px',
+          flexWrap: 'wrap',
+          gap: '8px',
+        }}
+      >
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <Navigation size={18} color="var(--accent-cyan)" />
-          <span style={{ fontWeight: '600', fontSize: '15px' }}>Geospatial Mesh Tracking Canvas</span>
-          <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
-            [EPSG:4326 | 500m Redis GEO Geofence]
+          <span style={{ fontWeight: '600', fontSize: '15px' }}>Live Geospatial Radar Map</span>
+          <span
+            style={{
+              fontSize: '11px',
+              color: 'var(--text-muted)',
+              fontFamily: 'var(--font-mono)',
+              background: 'rgba(255,255,255,0.04)',
+              padding: '2px 6px',
+              borderRadius: '4px',
+            }}
+          >
+            [Leaflet / CartoDB Dark Matter]
           </span>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+        {/* Tactical Badges & Controls */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <div
             style={{
               display: 'flex',
@@ -166,54 +319,164 @@ export const IncidentMap: React.FC<IncidentMapProps> = ({
               gap: '6px',
               padding: '4px 10px',
               borderRadius: '6px',
-              background: 'rgba(0,0,0,0.5)',
+              background: 'rgba(0,0,0,0.6)',
               border: '1px solid var(--border-color)',
               fontSize: '12px',
               fontFamily: 'var(--font-mono)',
               color: 'var(--accent-cyan)',
             }}
           >
-            <Crosshair size={14} />
+            <Crosshair size={13} />
             <span>LAT: {currentLat.toFixed(5)}</span>
             <span style={{ color: 'var(--text-muted)' }}>|</span>
             <span>LNG: {currentLng.toFixed(5)}</span>
           </div>
 
-          <div style={{ display: 'flex', gap: '4px' }}>
-            <button
-              style={{
-                background: 'rgba(255,255,255,0.05)',
-                border: '1px solid var(--border-color)',
-                borderRadius: '6px',
-                padding: '6px 8px',
-                color: 'var(--text-primary)',
-                cursor: 'pointer',
-              }}
-              title="Recenter Map"
-            >
-              <Crosshair size={14} />
-            </button>
-          </div>
+          {/* Style Switcher */}
+          <button
+            onClick={() => setMapStyle(mapStyle === 'dark' ? 'osm' : 'dark')}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '5px',
+              background: 'rgba(255,255,255,0.06)',
+              border: '1px solid var(--border-color)',
+              borderRadius: '6px',
+              padding: '5px 9px',
+              color: 'var(--text-secondary)',
+              fontSize: '12px',
+              cursor: 'pointer',
+            }}
+            title="Switch Map Tile Theme"
+          >
+            <Layers size={13} />
+            <span>{mapStyle === 'dark' ? 'Tactical Dark' : 'OSM Street'}</span>
+          </button>
+
+          {/* Geofence Toggle */}
+          <button
+            onClick={() => setShowGeofence(!showGeofence)}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '5px',
+              background: showGeofence ? 'rgba(6, 182, 212, 0.15)' : 'rgba(255,255,255,0.06)',
+              border: `1px solid ${showGeofence ? 'rgba(6, 182, 212, 0.4)' : 'var(--border-color)'}`,
+              borderRadius: '6px',
+              padding: '5px 9px',
+              color: showGeofence ? 'var(--accent-cyan)' : 'var(--text-secondary)',
+              fontSize: '12px',
+              cursor: 'pointer',
+            }}
+            title="Toggle 250m / 500m Geofence Rings"
+          >
+            <Radio size={13} />
+            <span>500m Mesh</span>
+          </button>
+
+          {/* Auto-Follow Toggle */}
+          <button
+            onClick={() => setAutoFollow(!autoFollow)}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '5px',
+              background: autoFollow ? 'rgba(16, 185, 129, 0.15)' : 'rgba(255,255,255,0.06)',
+              border: `1px solid ${autoFollow ? 'rgba(16, 185, 129, 0.4)' : 'var(--border-color)'}`,
+              borderRadius: '6px',
+              padding: '5px 9px',
+              color: autoFollow ? 'var(--accent-emerald)' : 'var(--text-secondary)',
+              fontSize: '12px',
+              cursor: 'pointer',
+            }}
+            title="Auto-Follow Victim Position"
+          >
+            <Compass size={13} />
+            <span>{autoFollow ? 'Tracking ON' : 'Tracking OFF'}</span>
+          </button>
+
+          {/* Recenter Button */}
+          <button
+            onClick={handleRecenter}
+            style={{
+              background: 'rgba(255,255,255,0.06)',
+              border: '1px solid var(--border-color)',
+              borderRadius: '6px',
+              padding: '5px 8px',
+              color: 'var(--text-primary)',
+              cursor: 'pointer',
+            }}
+            title="Recenter Map to Distress Beacon"
+          >
+            <Crosshair size={14} />
+          </button>
         </div>
       </div>
 
-      {/* Interactive Tactical Canvas */}
+      {/* Interactive Map Canvas Container */}
       <div
         style={{
           position: 'relative',
           flex: 1,
-          minHeight: '380px',
+          minHeight: '400px',
           borderRadius: '8px',
           overflow: 'hidden',
           border: '1px solid var(--border-color)',
         }}
       >
-        <canvas
-          ref={canvasRef}
-          width={800}
-          height={480}
-          style={{ width: '100%', height: '100%', display: 'block' }}
-        />
+        <div ref={mapContainerRef} style={{ width: '100%', height: '100%', minHeight: '400px' }} />
+
+        {/* Floating Zoom Controls Overlay */}
+        <div
+          style={{
+            position: 'absolute',
+            top: '12px',
+            right: '12px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '6px',
+            zIndex: 1000,
+          }}
+        >
+          <button
+            onClick={handleZoomIn}
+            style={{
+              background: 'rgba(15, 23, 42, 0.85)',
+              border: '1px solid var(--border-color)',
+              borderRadius: '6px',
+              width: '32px',
+              height: '32px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: 'var(--text-primary)',
+              cursor: 'pointer',
+              boxShadow: '0 4px 10px rgba(0,0,0,0.5)',
+            }}
+            title="Zoom In"
+          >
+            <ZoomIn size={16} />
+          </button>
+          <button
+            onClick={handleZoomOut}
+            style={{
+              background: 'rgba(15, 23, 42, 0.85)',
+              border: '1px solid var(--border-color)',
+              borderRadius: '6px',
+              width: '32px',
+              height: '32px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: 'var(--text-primary)',
+              cursor: 'pointer',
+              boxShadow: '0 4px 10px rgba(0,0,0,0.5)',
+            }}
+            title="Zoom Out"
+          >
+            <ZoomOut size={16} />
+          </button>
+        </div>
 
         {/* Floating Map Legend Overlay */}
         <div
@@ -223,26 +486,50 @@ export const IncidentMap: React.FC<IncidentMapProps> = ({
             left: '12px',
             padding: '8px 12px',
             borderRadius: '8px',
-            background: 'rgba(10, 13, 20, 0.85)',
+            background: 'rgba(10, 13, 20, 0.90)',
             backdropFilter: 'blur(8px)',
             border: '1px solid var(--border-color)',
             fontSize: '11px',
             display: 'flex',
             flexDirection: 'column',
             gap: '6px',
+            zIndex: 1000,
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <span style={{ width: '10px', height: '10px', borderRadius: '50%', background: '#ef4444' }} />
-            <span>Target / Distress Signal (1 Ping/Sec Throttled)</span>
+            <span
+              style={{
+                width: '10px',
+                height: '10px',
+                borderRadius: '50%',
+                background: '#ef4444',
+                boxShadow: '0 0 6px #ef4444',
+              }}
+            />
+            <span>Active Distress Signal (Live 1s GPS Ping)</span>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <span style={{ width: '10px', height: '10px', borderRadius: '50%', background: '#10b981' }} />
-            <span>Active Community Sentinels (&lt; 500m Geofence)</span>
+            <span
+              style={{
+                width: '10px',
+                height: '10px',
+                borderRadius: '50%',
+                background: '#10b981',
+                boxShadow: '0 0 6px #10b981',
+              }}
+            />
+            <span>Community Sentinels (Within 500m Geofence)</span>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <span style={{ width: '16px', height: '2px', background: '#ef4444' }} />
-            <span>GPS Breadcrumb Stream (PostgreSQL Throttled 2s)</span>
+            <span
+              style={{
+                width: '16px',
+                height: '2px',
+                background: '#ef4444',
+                borderStyle: 'dashed',
+              }}
+            />
+            <span>GPS Breadcrumb Trail ({breadcrumbLogs.length} Pings Logged)</span>
           </div>
         </div>
       </div>

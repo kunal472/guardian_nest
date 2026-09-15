@@ -35,5 +35,11 @@ export interface JoinIncidentPayload {
 
 export interface SystemConfigUpdatePayload {
   type: string;
-  newWeights: Record<string, any>;
+  yamnetScreamThreshold?: number;
+  openWakeWordThreshold?: number;
+  snatchThresholdG?: number;
+  batteryCriticalThreshold?: number;
+  deadmanTimeoutMins?: number;
+  newWeights?: Record<string, any>;
+  updatedAt?: string;
 }

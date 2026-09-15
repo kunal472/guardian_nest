@@ -116,3 +116,51 @@ export const RESOLVE_INCIDENT = `
     }
   }
 `;
+
+export interface SystemConfigData {
+  yamnetScreamThreshold: number;
+  openWakeWordThreshold: number;
+  snatchThresholdG: number;
+  batteryCriticalThreshold: number;
+  deadmanTimeoutMins: number;
+  updatedAt: string;
+}
+
+export const GET_SYSTEM_CONFIG = `
+  query GetSystemConfig {
+    systemConfig {
+      yamnetScreamThreshold
+      openWakeWordThreshold
+      snatchThresholdG
+      batteryCriticalThreshold
+      deadmanTimeoutMins
+      updatedAt
+    }
+  }
+`;
+
+export const UPDATE_SYSTEM_CONFIG = `
+  mutation UpdateSystemConfig(
+    $yamnetScreamThreshold: Float
+    $openWakeWordThreshold: Float
+    $snatchThresholdG: Float
+    $batteryCriticalThreshold: Float
+    $deadmanTimeoutMins: Int
+  ) {
+    updateSystemConfig(
+      yamnetScreamThreshold: $yamnetScreamThreshold
+      openWakeWordThreshold: $openWakeWordThreshold
+      snatchThresholdG: $snatchThresholdG
+      batteryCriticalThreshold: $batteryCriticalThreshold
+      deadmanTimeoutMins: $deadmanTimeoutMins
+    ) {
+      yamnetScreamThreshold
+      openWakeWordThreshold
+      snatchThresholdG
+      batteryCriticalThreshold
+      deadmanTimeoutMins
+      updatedAt
+    }
+  }
+`;
+

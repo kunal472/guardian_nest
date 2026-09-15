@@ -32,16 +32,31 @@ class HardwareSnatchService {
     MEDIUM: 3.2, // Standard threshold: typical hand-snatch acceleration
     HIGH: 2.2,   // Sensitive threshold: detects fast pocket pull or jog stumble
   };
+  private customThresholdG: number | null = null;
 
   /**
    * Set motion sensitivity level
    */
   public setSensitivity(level: SnatchSensitivity): void {
     this.sensitivity = level;
+    this.customThresholdG = null;
+  }
+
+  /**
+   * Set dynamic G-force threshold from remote Event Bus sync
+   */
+  public setCustomThresholdG(gValue: number): void {
+    if (gValue > 0) {
+      this.customThresholdG = gValue;
+    }
   }
 
   public getSensitivity(): SnatchSensitivity {
     return this.sensitivity;
+  }
+
+  public getActiveThreshold(): number {
+    return this.customThresholdG ?? this.THRESHOLDS[this.sensitivity];
   }
 
   /**
@@ -88,7 +103,7 @@ class HardwareSnatchService {
   private processSensorFrame(x: number, y: number, z: number): void {
     const magnitude = Math.sqrt(x * x + y * y + z * z);
     const deltaG = Math.abs(magnitude - 1.0);
-    const threshold = this.THRESHOLDS[this.sensitivity];
+    const threshold = this.getActiveThreshold();
     const isSpike = magnitude >= threshold;
 
     this.recentMagnitudes.push(magnitude);

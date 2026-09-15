@@ -1,7 +1,7 @@
-import { Args, ID, Int, Mutation, Query, Resolver } from '@nestjs/graphql';
+import { Args, Float, ID, Int, Mutation, Query, Resolver } from '@nestjs/graphql';
 import { PrismaService } from '../../prisma/prisma.service';
 import { IncidentsService } from '../../incidents/incidents.service';
-import { User, Incident } from '../types/models';
+import { User, Incident, SystemConfigModel } from '../types/models';
 import { UserRole, IncidentStatus } from '@prisma/client';
 
 @Resolver()
@@ -149,5 +149,38 @@ export class AdminResolver {
         loggedAt: log.loggedAt.toISOString(),
       })),
     };
+  }
+
+  // Global Edge System Config State
+  private currentConfig = {
+    yamnetScreamThreshold: 0.60,
+    openWakeWordThreshold: 0.70,
+    snatchThresholdG: 3.2,
+    batteryCriticalThreshold: 0.05,
+    deadmanTimeoutMins: 15,
+    updatedAt: new Date().toISOString(),
+  };
+
+  @Query(() => SystemConfigModel)
+  async systemConfig(): Promise<SystemConfigModel> {
+    return this.currentConfig;
+  }
+
+  @Mutation(() => SystemConfigModel)
+  async updateSystemConfig(
+    @Args('yamnetScreamThreshold', { type: () => Float, nullable: true }) yamnetScreamThreshold?: number,
+    @Args('openWakeWordThreshold', { type: () => Float, nullable: true }) openWakeWordThreshold?: number,
+    @Args('snatchThresholdG', { type: () => Float, nullable: true }) snatchThresholdG?: number,
+    @Args('batteryCriticalThreshold', { type: () => Float, nullable: true }) batteryCriticalThreshold?: number,
+    @Args('deadmanTimeoutMins', { type: () => Int, nullable: true }) deadmanTimeoutMins?: number,
+  ): Promise<SystemConfigModel> {
+    if (yamnetScreamThreshold !== undefined) this.currentConfig.yamnetScreamThreshold = yamnetScreamThreshold;
+    if (openWakeWordThreshold !== undefined) this.currentConfig.openWakeWordThreshold = openWakeWordThreshold;
+    if (snatchThresholdG !== undefined) this.currentConfig.snatchThresholdG = snatchThresholdG;
+    if (batteryCriticalThreshold !== undefined) this.currentConfig.batteryCriticalThreshold = batteryCriticalThreshold;
+    if (deadmanTimeoutMins !== undefined) this.currentConfig.deadmanTimeoutMins = deadmanTimeoutMins;
+    this.currentConfig.updatedAt = new Date().toISOString();
+
+    return this.currentConfig;
   }
 }
