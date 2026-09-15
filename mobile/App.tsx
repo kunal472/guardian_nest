@@ -26,6 +26,11 @@ import {
   hardwareLocationService,
   LocationFix,
 } from './src/services/hardwareLocationService';
+import {
+  hardwareBatteryService,
+  BatteryInfo,
+  BatteryStateEnum,
+} from './src/services/hardwareBatteryService';
 
 const BACKEND_URL = 'http://localhost:3000';
 
@@ -66,6 +71,8 @@ export default function App() {
 
   // Network & Battery Resilience States
   const [batteryLevel, setBatteryLevel] = useState<number>(85);
+  const [batteryState, setBatteryState] = useState<BatteryStateEnum>('UNPLUGGED');
+  const [isLowPowerMode, setIsLowPowerMode] = useState<boolean>(false);
   const [isSimulatedOffline, setIsSimulatedOffline] = useState<boolean>(false);
   const [isConnected, setIsConnected] = useState<boolean>(false);
   const [offlineQueue, setOfflineQueue] = useState<QueuedLocation[]>([]);
@@ -355,6 +362,24 @@ export default function App() {
       hardwareLocationService.stopTracking();
     };
   }, [isSosActive, incidentId, isVolunteer, isSimulatedOffline, isConnected, lastGaspSent, isDevicePoweredOff, isHardwareGps, currentUser]);
+
+  // Live Battery Monitoring via Hardware Battery Service (expo-battery + Web Battery API)
+  useEffect(() => {
+    hardwareBatteryService.startListening((info: BatteryInfo) => {
+      setBatteryLevel(info.level);
+      setBatteryState(info.state);
+      setIsLowPowerMode(info.isLowPowerMode);
+
+      if (info.isCritical && isSosActive && !lastGaspSent) {
+        setLastGaspSent(true);
+        transmitLocation(coords.lat, coords.lng, info.level, true);
+      }
+    });
+
+    return () => {
+      hardwareBatteryService.stopListening();
+    };
+  }, [isSosActive, lastGaspSent, coords]);
 
   // Dead Man's Switch Countdown Timer
   useEffect(() => {
@@ -689,7 +714,19 @@ export default function App() {
 
         {/* Network & Battery Resiliency Center */}
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>Network Resiliency & Pre-Shutdown Armor</Text>
+          <View style={styles.rowBetween}>
+            <Text style={styles.cardTitle}>Network Resiliency & Pre-Shutdown Armor</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              {isLowPowerMode && (
+                <View style={{ backgroundColor: 'rgba(245, 158, 11, 0.2)', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
+                  <Text style={{ fontSize: 10, color: '#fbbf24', fontWeight: '800' }}>LOW POWER</Text>
+                </View>
+              )}
+              <Text style={{ fontSize: 11, fontWeight: '700', color: batteryState === 'CHARGING' ? '#10b981' : '#94a3b8' }}>
+                {batteryState === 'CHARGING' ? '⚡ CHARGING' : batteryState === 'FULL' ? '🔋 FULL' : '🔋 UNPLUGGED'}
+              </Text>
+            </View>
+          </View>
           
           <View style={styles.rowBetween}>
             <Text style={styles.metaLabel}>Battery Level:</Text>
@@ -702,15 +739,18 @@ export default function App() {
 
           {/* Simulated Battery Controls */}
           <View style={styles.batteryPresetRow}>
-            <Text style={styles.metaLabel}>Simulate Battery:</Text>
-            <TouchableOpacity style={styles.battBtn} onPress={() => setBatteryLevel(100)}>
+            <Text style={styles.metaLabel}>Simulate QA:</Text>
+            <TouchableOpacity style={styles.battBtn} onPress={() => hardwareBatteryService.setSimulatedLevel(100, (i) => setBatteryLevel(i.level))}>
               <Text style={styles.battBtnText}>100%</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.battBtn} onPress={() => setBatteryLevel(15)}>
+            <TouchableOpacity style={styles.battBtn} onPress={() => hardwareBatteryService.setSimulatedLevel(15, (i) => setBatteryLevel(i.level))}>
               <Text style={styles.battBtnText}>15%</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={[styles.battBtn, styles.battBtnCritical]} onPress={() => setBatteryLevel(4)}>
+            <TouchableOpacity style={[styles.battBtn, styles.battBtnCritical]} onPress={() => hardwareBatteryService.setSimulatedLevel(4, (i) => setBatteryLevel(i.level))}>
               <Text style={styles.battBtnCriticalText}>4% (Dying)</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.battBtn} onPress={() => hardwareBatteryService.setSimulatedLevel(null, () => hardwareBatteryService.getBatterySnapshot().then(i => setBatteryLevel(i.level)))}>
+              <Text style={styles.battBtnText}>🔄 Real</Text>
             </TouchableOpacity>
           </View>
 
