@@ -753,9 +753,9 @@ export default function App() {
             </View>
 
             <View style={styles.rowBetween}>
-              <Text style={styles.metaLabel}>Spotter B (Porcupine Keyword):</Text>
+              <Text style={styles.metaLabel}>Spotter B (openWakeWord Zero-Key):</Text>
               <Text style={[styles.metaValue, pipelineTelemetry.wakeWordDetected ? { color: '#a855f7', fontWeight: '800' } : { color: '#94a3b8' }]}>
-                {pipelineTelemetry.wakeWordDetected ? `"${pipelineTelemetry.wakeWordDetected}" Spotted` : '"Help" / "Emergency" / "Guardian"'}
+                {pipelineTelemetry.wakeWordDetected ? `"${pipelineTelemetry.wakeWordDetected}" Spotted` : '"Help Me" / "Emergency" / "Hey Guardian"'}
               </Text>
             </View>
 
@@ -845,7 +845,7 @@ export default function App() {
                 style={[styles.mlPill, { backgroundColor: 'rgba(168, 85, 247, 0.15)', borderColor: '#a855f7' }]}
                 onPress={() => twoTierDistressPipeline.handleWakeWordSpotterEvent('Help Me', true)}
               >
-                <Text style={[styles.mlPillText, { color: '#d8b4fe' }]}>📢 Wake-Word (Owner)</Text>
+                <Text style={[styles.mlPillText, { color: '#d8b4fe' }]}>📢 openWakeWord (Owner)</Text>
               </TouchableOpacity>
 
               <TouchableOpacity

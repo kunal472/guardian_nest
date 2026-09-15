@@ -3,8 +3,11 @@ import {
   speakerBiometricsService,
   VerificationResult,
 } from './speakerBiometricsService';
+import {
+  openWakeWordService,
+} from './openWakeWordService';
 
-export type Tier1TriggerType = 'NONE' | 'YAMNET_SCREAM' | 'PORCUPINE_WAKE_WORD';
+export type Tier1TriggerType = 'NONE' | 'YAMNET_SCREAM' | 'OPEN_WAKE_WORD';
 export type Tier2Status = 'idle' | 'transcribing' | 'intent_verifying' | 'escalated' | 'rejected';
 
 export interface PipelineTelemetry {
@@ -171,8 +174,8 @@ class TwoTierDistressPipeline {
   }
 
   /**
-   * Process Tier 1 Trigger B: Keyword / Wake-Word Spotter (Porcupine)
-   * Target words: "Help", "Emergency", "Guardian", "Help Me"
+   * Process Tier 1 Trigger B: openWakeWord Neural Keyword Spotter (100% Open-Source, Zero-Key)
+   * Target models: "Help Me", "Emergency", "Hey Guardian", "Stop"
    * Evaluates Speaker Biometrics (Cosine Similarity >= 0.72) to reject bystander false alarms.
    */
   public async handleWakeWordSpotterEvent(
@@ -180,6 +183,9 @@ class TwoTierDistressPipeline {
     isOwnerUtterance: boolean = true,
   ): Promise<void> {
     if (!this.isRunning) this.startPipeline();
+
+    // Trigger openWakeWord feature predictor
+    openWakeWordService.simulateWakeWordTrigger(wakeWord, 0.94);
 
     const startTime = Date.now();
     this.telemetry = {
@@ -218,7 +224,7 @@ class TwoTierDistressPipeline {
     }
 
     // Owner verified! Activate Tier 2 Whisper Verification
-    await this.runTier2HeavyVerification(audioContext, 'PORCUPINE_WAKE_WORD', 0.95, wakeWord, startTime);
+    await this.runTier2HeavyVerification(audioContext, 'OPEN_WAKE_WORD', 0.95, wakeWord, startTime);
   }
 
   /**
