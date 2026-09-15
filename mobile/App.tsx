@@ -22,6 +22,10 @@ import {
   clearStoredCitizenAuth,
   CitizenUser,
 } from './src/services/authService';
+import {
+  hardwareLocationService,
+  LocationFix,
+} from './src/services/hardwareLocationService';
 
 const BACKEND_URL = 'http://localhost:3000';
 
@@ -54,6 +58,9 @@ export default function App() {
   const [isStealthMode, setIsStealthMode] = useState<boolean>(false);
   const [calculatorInput, setCalculatorInput] = useState<string>('0');
   const [coords, setCoords] = useState<{ lat: number; lng: number }>({ lat: 40.7128, lng: -74.006 });
+  const [locationAccuracy, setLocationAccuracy] = useState<number | null>(null);
+  const [locationSpeed, setLocationSpeed] = useState<number | null>(null);
+  const [isHardwareGps, setIsHardwareGps] = useState<boolean>(true);
   const [pingCount, setPingCount] = useState<number>(0);
   const [deadmanSeconds, setDeadmanSeconds] = useState<number | null>(null);
 
@@ -308,45 +315,46 @@ export default function App() {
     });
   };
 
-  // Live GPS Location Streaming with Dynamic Throttling & Battery Drain
+  // Live GPS Location Streaming via Hardware Location Service (expo-location + Web GPS)
   useEffect(() => {
-    if (streamIntervalRef.current) clearInterval(streamIntervalRef.current);
-    if (isDevicePoweredOff) return;
+    if (isDevicePoweredOff) {
+      hardwareLocationService.stopTracking();
+      return;
+    }
 
-    const throttleIntervalMs = isSosActive ? 1000 : 10000;
+    hardwareLocationService.setSimulatedMode(!isHardwareGps, coords);
 
-    streamIntervalRef.current = setInterval(() => {
-      setCoords((prev) => {
-        const nextLat = prev.lat + (isSosActive ? (Math.random() - 0.5) * 0.0004 : 0);
-        const nextLng = prev.lng + (isSosActive ? (Math.random() - 0.5) * 0.0004 : 0);
+    const handleLocationUpdate = (loc: LocationFix) => {
+      setCoords({ lat: loc.lat, lng: loc.lng });
+      setLocationAccuracy(loc.accuracy ?? null);
+      setLocationSpeed(loc.speed ?? null);
 
-        setBatteryLevel((prevBatt) => {
-          const nextBatt = isSosActive ? Math.max(1, prevBatt - (prevBatt > 10 ? 1 : 0.5)) : prevBatt;
+      setBatteryLevel((prevBatt) => {
+        const nextBatt = isSosActive ? Math.max(1, prevBatt - (prevBatt > 10 ? 1 : 0.5)) : prevBatt;
 
-          if (nextBatt <= 5 && !lastGaspSent && isSosActive) {
-            setLastGaspSent(true);
-            transmitLocation(nextLat, nextLng, nextBatt, true);
-          } else if (isSosActive) {
-            transmitLocation(nextLat, nextLng, nextBatt, false);
-          } else if (isVolunteer && socketRef.current?.connected && !isSimulatedOffline) {
-            socketRef.current.emit('volunteer:location_update', {
-              volunteerId: 'u_mobile_volunteer',
-              lat: nextLat,
-              lng: nextLng,
-            });
-          }
+        if (nextBatt <= 5 && !lastGaspSent && isSosActive) {
+          setLastGaspSent(true);
+          transmitLocation(loc.lat, loc.lng, nextBatt, true);
+        } else if (isSosActive) {
+          transmitLocation(loc.lat, loc.lng, nextBatt, false);
+        } else if (isVolunteer && socketRef.current?.connected && !isSimulatedOffline) {
+          socketRef.current.emit('volunteer:location_update', {
+            volunteerId: currentUser?.id || 'u_mobile_volunteer',
+            lat: loc.lat,
+            lng: loc.lng,
+          });
+        }
 
-          return nextBatt;
-        });
-
-        return { lat: nextLat, lng: nextLng };
+        return nextBatt;
       });
-    }, throttleIntervalMs);
+    };
+
+    hardwareLocationService.startTracking(handleLocationUpdate, isSosActive);
 
     return () => {
-      if (streamIntervalRef.current) clearInterval(streamIntervalRef.current);
+      hardwareLocationService.stopTracking();
     };
-  }, [isSosActive, incidentId, isVolunteer, isSimulatedOffline, isConnected, lastGaspSent, isDevicePoweredOff]);
+  }, [isSosActive, incidentId, isVolunteer, isSimulatedOffline, isConnected, lastGaspSent, isDevicePoweredOff, isHardwareGps, currentUser]);
 
   // Dead Man's Switch Countdown Timer
   useEffect(() => {
@@ -757,21 +765,63 @@ export default function App() {
 
         {/* GPS Stream Telemetry Card */}
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>Live Geospatial Telemetry</Text>
+          <View style={styles.rowBetween}>
+            <Text style={styles.cardTitle}>Live Geospatial Telemetry</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              <Text style={{ fontSize: 11, fontWeight: '700', color: isHardwareGps ? '#10b981' : '#f59e0b' }}>
+                {isHardwareGps ? '🛰️ HARDWARE GPS' : '🎮 SIMULATED'}
+              </Text>
+            </View>
+          </View>
+
           <View style={styles.rowBetween}>
             <Text style={styles.metaLabel}>GPS Coordinates:</Text>
             <Text style={styles.metaValue}>{coords.lat.toFixed(5)}, {coords.lng.toFixed(5)}</Text>
           </View>
+          
+          <View style={styles.rowBetween}>
+            <Text style={styles.metaLabel}>Fix Accuracy:</Text>
+            <Text style={[styles.metaValue, { color: locationAccuracy && locationAccuracy < 10 ? '#10b981' : '#38bdf8' }]}>
+              {locationAccuracy ? `±${locationAccuracy.toFixed(1)}m (High Accuracy)` : 'Locating Satellites...'}
+            </Text>
+          </View>
+
+          {locationSpeed !== null && locationSpeed !== undefined && (
+            <View style={styles.rowBetween}>
+              <Text style={styles.metaLabel}>Movement Velocity:</Text>
+              <Text style={styles.metaValue}>{(locationSpeed * 3.6).toFixed(1)} km/h</Text>
+            </View>
+          )}
+
           <View style={styles.rowBetween}>
             <Text style={styles.metaLabel}>Pings Streamed:</Text>
             <Text style={styles.metaValue}>{pingCount} updates</Text>
           </View>
+
           <View style={styles.rowBetween}>
             <Text style={styles.metaLabel}>Throttling Policy:</Text>
             <Text style={styles.metaValue}>
               {isSosActive ? 'High-Frequency (1000ms)' : 'Battery Saver (10000ms)'}
             </Text>
           </View>
+
+          <TouchableOpacity
+            style={{
+              marginTop: 10,
+              paddingVertical: 8,
+              paddingHorizontal: 12,
+              borderRadius: 8,
+              backgroundColor: 'rgba(255, 255, 255, 0.05)',
+              borderWidth: 1,
+              borderColor: 'rgba(255, 255, 255, 0.1)',
+              alignItems: 'center',
+            }}
+            onPress={() => setIsHardwareGps(!isHardwareGps)}
+          >
+            <Text style={{ fontSize: 12, color: '#94a3b8', fontWeight: '600' }}>
+              {isHardwareGps ? 'Switch to Test Simulation Wander' : 'Switch to Real Satellite GPS'}
+            </Text>
+          </TouchableOpacity>
         </View>
 
         {/* Simulated Edge ML Triggers */}
@@ -798,7 +848,7 @@ export default function App() {
 
         {/* Dead Man's Switch Safety Timer */}
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>Dead Man's Switch Timer</Text>
+          <Text style={styles.cardTitle}>{"Dead Man's Switch Timer"}</Text>
           <Text style={styles.cardDesc}>
             Triggers automatic SOS distress if you do not check-in before the timer hits zero.
           </Text>
