@@ -143,47 +143,83 @@ export const IncidentDetail: React.FC<IncidentDetailProps> = ({
         </div>
       </div>
 
-      {/* Audio Evidence Player (AWS S3 Presigned URL Vault) */}
+      {/* Audio Evidence Player (AWS S3 & Fastify Vault Buffer) */}
       <div
         style={{
-          background: 'rgba(17, 24, 39, 0.7)',
-          padding: '12px 16px',
+          background: 'rgba(17, 24, 39, 0.85)',
+          padding: '14px 16px',
           borderRadius: '8px',
-          border: '1px solid rgba(59, 130, 246, 0.2)',
+          border: '1px solid rgba(59, 130, 246, 0.3)',
           display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
+          flexDirection: 'column',
+          gap: '10px',
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: 'rgba(59, 130, 246, 0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <Mic size={16} color="#3b82f6" />
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <div style={{ width: '34px', height: '34px', borderRadius: '50%', background: 'rgba(59, 130, 246, 0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <Mic size={16} color="#38bdf8" />
+            </div>
+            <div>
+              <div style={{ fontSize: '13px', fontWeight: '700', color: '#f8fafc' }}>
+                30s Distress Audio Buffer (Encrypted Vault)
+              </div>
+              <div style={{ fontSize: '11px', color: '#94a3b8' }}>
+                {incident.evidenceAudioUrl ? `Vault Asset: ${incident.evidenceAudioUrl.split('/').pop()}` : 'AES-256 Encrypted Secure Audio Channel'}
+              </div>
+            </div>
           </div>
-          <div>
-            <div style={{ fontSize: '13px', fontWeight: '600' }}>30s Encrypted Audio Buffer</div>
-            <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>S3 Vault Presigned Key (AES-256)</div>
-          </div>
+
+          <button
+            onClick={() => setIsPlayingAudio(!isPlayingAudio)}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '8px 14px',
+              borderRadius: '6px',
+              background: isPlayingAudio ? '#ef4444' : 'rgba(59, 130, 246, 0.25)',
+              border: isPlayingAudio ? '1px solid #ef4444' : '1px solid #3b82f6',
+              color: '#fff',
+              fontSize: '12px',
+              fontWeight: '700',
+              cursor: 'pointer',
+              transition: 'all 0.2s',
+            }}
+          >
+            {isPlayingAudio ? <Volume2 size={14} className="animate-pulse" /> : <Play size={14} />}
+            <span>{isPlayingAudio ? 'Listening...' : 'Play Audio'}</span>
+          </button>
         </div>
 
-        <button
-          onClick={() => setIsPlayingAudio(!isPlayingAudio)}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '6px',
-            padding: '6px 12px',
-            borderRadius: '6px',
-            background: isPlayingAudio ? '#ef4444' : 'rgba(59, 130, 246, 0.2)',
-            border: isPlayingAudio ? '1px solid #ef4444' : '1px solid #3b82f6',
-            color: '#fff',
-            fontSize: '12px',
-            fontWeight: '600',
-            cursor: 'pointer',
-          }}
-        >
-          {isPlayingAudio ? <Volume2 size={14} className="animate-pulse" /> : <Play size={14} />}
-          <span>{isPlayingAudio ? 'Listening...' : 'Play Audio'}</span>
-        </button>
+        {/* Audio Waveform / Scrubber Progress Indicator */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <span style={{ fontSize: '11px', color: '#64748b', fontFamily: 'monospace' }}>
+            {isPlayingAudio ? '00:14' : '00:00'}
+          </span>
+          <div style={{ flex: 1, height: '6px', background: 'rgba(255, 255, 255, 0.1)', borderRadius: '3px', overflow: 'hidden', position: 'relative' }}>
+            <div
+              style={{
+                width: isPlayingAudio ? '48%' : '0%',
+                height: '100%',
+                background: isPlayingAudio ? 'linear-gradient(90deg, #38bdf8, #ef4444)' : '#38bdf8',
+                borderRadius: '3px',
+                transition: 'width 0.3s ease',
+              }}
+            />
+          </div>
+          <span style={{ fontSize: '11px', color: '#64748b', fontFamily: 'monospace' }}>00:30</span>
+        </div>
+
+        {incident.evidenceAudioUrl && (
+          <audio
+            controls
+            style={{ display: isPlayingAudio ? 'block' : 'none', width: '100%', height: '32px', marginTop: '4px' }}
+            src={incident.evidenceAudioUrl.startsWith('http') ? incident.evidenceAudioUrl : `http://localhost:3000${incident.evidenceAudioUrl}`}
+            autoPlay={isPlayingAudio}
+            onEnded={() => setIsPlayingAudio(false)}
+          />
+        )}
       </div>
 
       {/* Dispatch Action Controls */}

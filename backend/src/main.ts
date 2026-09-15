@@ -2,6 +2,10 @@ import { NestFactory } from '@nestjs/core';
 import { FastifyAdapter, NestFastifyApplication } from '@nestjs/platform-fastify';
 import { ValidationPipe, Logger } from '@nestjs/common';
 import { AppModule } from './app.module';
+import fastifyMultipart from '@fastify/multipart';
+import fastifyStatic from '@fastify/static';
+import * as path from 'path';
+import * as fs from 'fs';
 
 async function bootstrap() {
   const logger = new Logger('Bootstrap');
@@ -14,6 +18,26 @@ async function bootstrap() {
     AppModule,
     fastifyAdapter,
   );
+
+  // Ensure uploads/evidence directory exists
+  const uploadsDir = path.join(process.cwd(), 'uploads', 'evidence');
+  if (!fs.existsSync(uploadsDir)) {
+    fs.mkdirSync(uploadsDir, { recursive: true });
+  }
+
+  // Register multipart support for audio evidence uploads
+  await app.register(fastifyMultipart as any, {
+    limits: {
+      fileSize: 25 * 1024 * 1024, // 25 MB max
+    },
+  });
+
+  // Register static file serving for uploaded evidence
+  await app.register(fastifyStatic as any, {
+    root: path.join(process.cwd(), 'uploads'),
+    prefix: '/uploads/',
+    decorateReply: false,
+  });
 
   // Enable CORS
   app.enableCors({
@@ -41,3 +65,4 @@ async function bootstrap() {
 bootstrap().catch((err) => {
   console.error('Fatal error starting Guardian NestJS Backend:', err);
 });
+

@@ -170,7 +170,27 @@ export class IncidentsService {
     });
   }
 
+  async attachAudioEvidence(incidentId: string, audioUrl: string) {
+    const incident = await this.prisma.incident.update({
+      where: { id: incidentId },
+      data: { evidenceAudioUrl: audioUrl },
+      include: {
+        user: { select: { id: true, name: true, phone: true } },
+        locationLogs: { orderBy: { loggedAt: 'desc' }, take: 10 },
+      },
+    });
+
+    const activeData = (await this.redis.getActiveIncident(incidentId)) || {};
+    await this.redis.cacheActiveIncident(incidentId, {
+      ...activeData,
+      evidenceAudioUrl: audioUrl,
+    });
+
+    return incident;
+  }
+
   generateAudioPresignedUrl(incidentId: string) {
     return `https://guardian-evidence-vault.s3.amazonaws.com/${incidentId}/evidence_${Date.now()}.m4a?token=mock_presigned_url_valid_300s`;
   }
 }
+

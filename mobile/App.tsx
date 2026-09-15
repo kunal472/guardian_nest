@@ -36,6 +36,10 @@ import {
   MotionTelemetry,
   SnatchSensitivity,
 } from './src/services/hardwareSnatchService';
+import {
+  hardwareAudioVaultService,
+  AudioVaultState,
+} from './src/services/hardwareAudioVaultService';
 
 const BACKEND_URL = 'http://localhost:3000';
 
@@ -95,12 +99,32 @@ export default function App() {
   const [mlSensitivityThreshold, setMlSensitivityThreshold] = useState<number>(0.80);
   const [isModelReady, setIsModelReady] = useState<boolean>(false);
 
+  // 30-Second Audio Evidence Vault State
+  const [audioVault, setAudioVault] = useState<AudioVaultState>({
+    status: 'idle',
+    elapsedSeconds: 0,
+    remainingSeconds: 30,
+    audioMetering: 0,
+    recordingUri: null,
+    uploadedUrl: null,
+    errorMessage: null,
+    isSimulated: false,
+  });
+
   const socketRef = useRef<Socket | null>(null);
   const streamIntervalRef = useRef<any>(null);
   const coordsRef = useRef(coords);
   const batteryRef = useRef(batteryLevel);
   const isSosActiveRef = useRef(isSosActive);
   const incidentIdRef = useRef(incidentId);
+
+  // Subscribe to 30s Hardware Audio Vault Service
+  useEffect(() => {
+    const unsub = hardwareAudioVaultService.subscribe((state) => {
+      setAudioVault(state);
+    });
+    return unsub;
+  }, []);
 
   // Initialize ML Model Placeholder
   useEffect(() => {
@@ -238,6 +262,7 @@ export default function App() {
 
     socket.on('distress:acknowledged', (data: any) => {
       setIncidentId(data.incidentId);
+      hardwareAudioVaultService.startEvidenceCapture(data.incidentId, 30);
     });
 
     socket.on('events.responder.status_change', (data: any) => {
@@ -433,6 +458,9 @@ export default function App() {
     setResponderStatus('ALERTING_DISPATCH');
     setLastGaspSent(false);
 
+    // Automatically initialize 30s emergency audio evidence capture
+    hardwareAudioVaultService.startEvidenceCapture(incidentId || undefined, 30);
+
     if (socketRef.current && socketRef.current.connected && !isSimulatedOffline) {
       socketRef.current.emit('distress:triggered', {
         userId: currentUser?.id || 'u_victim_mobile_01',
@@ -461,6 +489,7 @@ export default function App() {
     setDeadmanSeconds(null);
     setLastGaspSent(false);
     setShutdownLastGaspNotice(null);
+    hardwareAudioVaultService.reset();
   };
 
   const handleLogout = () => {
@@ -737,6 +766,107 @@ export default function App() {
             >
               <Text style={styles.mlToggleBtnText}>
                 {isMlListening ? '🛑 Stop Audio Detection' : '🎙️ Activate Edge Scream Detection'}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        {/* 30-Second Audio Evidence Vault Card */}
+        <View style={styles.card}>
+          <View style={styles.rowBetween}>
+            <View style={{ flex: 1, paddingRight: 8 }}>
+              <Text style={styles.cardTitle}>30s Audio Evidence Vault</Text>
+              <Text style={styles.cardDesc}>
+                {audioVault.status === 'recording'
+                  ? `Recording Emergency Audio (${audioVault.remainingSeconds}s remaining)`
+                  : audioVault.status === 'uploading'
+                  ? 'Transmitting encrypted audio payload to vault...'
+                  : audioVault.status === 'secured'
+                  ? 'Evidence locked in AES-256 Vault'
+                  : 'Captures high-fidelity 30s audio buffer upon emergency trigger'}
+              </Text>
+            </View>
+            <View
+              style={[
+                styles.modelStatusBadge,
+                audioVault.status === 'recording'
+                  ? { backgroundColor: 'rgba(239, 68, 68, 0.2)', borderColor: '#ef4444' }
+                  : audioVault.status === 'secured'
+                  ? styles.modelStatusBadgeReady
+                  : {},
+              ]}
+            >
+              <Text
+                style={[
+                  styles.modelStatusBadgeText,
+                  audioVault.status === 'recording'
+                    ? { color: '#f87171' }
+                    : audioVault.status === 'secured'
+                    ? { color: '#34d399' }
+                    : {},
+                ]}
+              >
+                {audioVault.status === 'recording'
+                  ? `🔴 REC (${audioVault.remainingSeconds}s)`
+                  : audioVault.status === 'uploading'
+                  ? 'UPLOADING'
+                  : audioVault.status === 'secured'
+                  ? 'VAULT SECURED'
+                  : 'ARMED'}
+              </Text>
+            </View>
+          </View>
+
+          {/* Real-Time Audio Level Spectrum Visualizer */}
+          {audioVault.status === 'recording' && (
+            <View style={{ marginTop: 10, marginBottom: 8 }}>
+              <View style={styles.rowBetween}>
+                <Text style={styles.metaLabel}>Mic Amplitude Level:</Text>
+                <Text style={[styles.metaValue, { color: '#ef4444', fontWeight: '800' }]}>
+                  {audioVault.audioMetering}% (16kHz AAC/PCM)
+                </Text>
+              </View>
+              <View style={[styles.meterTrack, { marginTop: 6 }]}>
+                <View
+                  style={[
+                    styles.meterFill,
+                    {
+                      width: `${audioVault.audioMetering}%`,
+                      backgroundColor: '#ef4444',
+                    },
+                  ]}
+                />
+              </View>
+            </View>
+          )}
+
+          {audioVault.uploadedUrl && (
+            <View style={{ marginTop: 8, padding: 8, borderRadius: 6, backgroundColor: 'rgba(56, 189, 248, 0.1)', borderWidth: 1, borderColor: 'rgba(56, 189, 248, 0.2)' }}>
+              <Text style={{ fontSize: 11, color: '#38bdf8', fontWeight: '600' }}>
+                🔒 Vault Ref: {audioVault.uploadedUrl}
+              </Text>
+            </View>
+          )}
+
+          <View style={{ flexDirection: 'row', gap: 10, marginTop: 12 }}>
+            <TouchableOpacity
+              style={[
+                styles.mlToggleBtn,
+                { flex: 1, marginTop: 0 },
+                audioVault.status === 'recording' && styles.mlToggleBtnActive,
+              ]}
+              onPress={() => {
+                if (audioVault.status === 'recording') {
+                  hardwareAudioVaultService.stopAndSecure(BACKEND_URL, authToken || undefined);
+                } else {
+                  hardwareAudioVaultService.startEvidenceCapture(incidentId || undefined, 30);
+                }
+              }}
+            >
+              <Text style={styles.mlToggleBtnText}>
+                {audioVault.status === 'recording'
+                  ? '⏹️ Stop & Transmit to Vault'
+                  : '🎙️ Record 30s Audio Evidence'}
               </Text>
             </TouchableOpacity>
           </View>
