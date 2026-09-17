@@ -107,11 +107,15 @@ export const CitizenAuth: React.FC<CitizenAuthProps> = ({
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      <ScrollView contentContainerStyle={styles.scrollContainer} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        contentContainerStyle={styles.scrollContainer}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
         {/* Top Hero Brand */}
         <View style={styles.header}>
           <View style={styles.iconContainer}>
-            <Shield size={36} color="#ffffff" />
+            <Shield size={34} color="#ffffff" />
           </View>
           <View style={styles.appTitleRow}>
             <Text style={styles.appTitle}>PROJECT </Text>
@@ -126,6 +130,7 @@ export const CitizenAuth: React.FC<CitizenAuthProps> = ({
         <View style={styles.tabBar}>
           <TouchableOpacity
             style={[styles.tabButton, mode === 'login' && styles.tabButtonActive]}
+            activeOpacity={0.8}
             onPress={() => {
               setMode('login');
               setErrorMsg(null);
@@ -137,6 +142,7 @@ export const CitizenAuth: React.FC<CitizenAuthProps> = ({
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.tabButton, mode === 'register' && styles.tabButtonActive]}
+            activeOpacity={0.8}
             onPress={() => {
               setMode('register');
               setErrorMsg(null);
@@ -269,6 +275,7 @@ export const CitizenAuth: React.FC<CitizenAuthProps> = ({
                       styles.mlPill,
                       mlSensitivity === level && styles.mlPillActive,
                     ]}
+                    activeOpacity={0.8}
                     onPress={() => setMlSensitivity(level)}
                   >
                     <Text
@@ -293,9 +300,9 @@ export const CitizenAuth: React.FC<CitizenAuthProps> = ({
                   {isVolunteer && <CheckCircle2 size={16} color="#ffffff" />}
                 </View>
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.volunteerTitle}>Join Community Volunteer Mesh</Text>
+                  <Text style={styles.volunteerTitle}>Join Volunteer Sentinel Mesh</Text>
                   <Text style={styles.volunteerDesc}>
-                    Receive silent alerts when someone within 500m triggers an SOS
+                    Receive silent proximity alerts when someone within 500m triggers an SOS
                   </Text>
                 </View>
               </TouchableOpacity>
@@ -324,19 +331,27 @@ export const CitizenAuth: React.FC<CitizenAuthProps> = ({
 
         {/* Quick Demo Pre-fills & Guest SOS Bypass */}
         <View style={styles.quickBar}>
-          <TouchableOpacity style={styles.prefillButton} onPress={fillSampleCitizen}>
+          <TouchableOpacity
+            style={styles.prefillButton}
+            onPress={fillSampleCitizen}
+            activeOpacity={0.8}
+          >
             <Zap size={14} color="#f59e0b" />
-            <Text style={styles.prefillButtonText}>Pre-fill Sample Citizen</Text>
+            <Text style={styles.prefillButtonText}>Pre-fill Sample</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.guestButton} onPress={onBypassGuestMode}>
+          <TouchableOpacity
+            style={styles.guestButton}
+            onPress={onBypassGuestMode}
+            activeOpacity={0.8}
+          >
             <ShieldAlert size={14} color="#ef4444" />
-            <Text style={styles.guestButtonText}>Test SOS (Guest Mode)</Text>
+            <Text style={styles.guestButtonText}>Test SOS (Guest)</Text>
           </TouchableOpacity>
         </View>
 
         <Text style={styles.footerNote}>
-          Encrypted AES-256 Mesh • Real-time WebSockets • Edge ML VAD
+          Encrypted AES-256 Mesh • Real-time WebSockets • Edge ML
         </Text>
       </ScrollView>
     </SafeAreaView>
@@ -349,44 +364,32 @@ const styles = StyleSheet.create({
     backgroundColor: '#0a0d14',
   },
   scrollContainer: {
-    paddingHorizontal: 20,
-    paddingTop: Platform.OS === 'web' ? 40 : 20,
-    paddingBottom: 40,
-    maxWidth: 540,
+    paddingHorizontal: 16,
+    paddingTop: Platform.OS === 'web' ? 32 : 16,
+    paddingBottom: 36,
+    maxWidth: 500,
     width: '100%',
     alignSelf: 'center',
   },
   header: {
     alignItems: 'center',
-    marginBottom: 24,
+    marginBottom: 20,
   },
   iconContainer: {
-    width: 64,
-    height: 64,
-    borderRadius: 20,
+    width: 60,
+    height: 60,
+    borderRadius: 18,
     backgroundColor: '#ef4444',
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 14,
-    ...Platform.select({
-      web: {
-        boxShadow: '0 0 35px rgba(239, 68, 68, 0.45)',
-      },
-      default: {
-        shadowColor: '#ef4444',
-        shadowOffset: { width: 0, height: 6 },
-        shadowOpacity: 0.5,
-        shadowRadius: 16,
-        elevation: 8,
-      },
-    }),
+    marginBottom: 12,
   },
   appTitleRow: {
     flexDirection: 'row',
     alignItems: 'center',
   },
   appTitle: {
-    fontSize: 24,
+    fontSize: 22,
     fontWeight: '900',
     letterSpacing: 0.5,
     color: '#ffffff',
@@ -395,18 +398,18 @@ const styles = StyleSheet.create({
     color: '#ef4444',
   },
   appSubtitle: {
-    fontSize: 13,
+    fontSize: 12,
     color: '#94a3b8',
     textAlign: 'center',
-    marginTop: 6,
-    paddingHorizontal: 16,
+    marginTop: 4,
+    paddingHorizontal: 12,
   },
   tabBar: {
     flexDirection: 'row',
     backgroundColor: 'rgba(30, 41, 59, 0.6)',
     borderRadius: 12,
     padding: 4,
-    marginBottom: 18,
+    marginBottom: 16,
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.08)',
   },
@@ -415,14 +418,11 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     alignItems: 'center',
     borderRadius: 9,
+    minHeight: 40,
+    justifyContent: 'center',
   },
   tabButtonActive: {
     backgroundColor: '#ef4444',
-    ...Platform.select({
-      web: {
-        boxShadow: '0 2px 10px rgba(239, 68, 68, 0.35)',
-      },
-    }),
   },
   tabText: {
     fontSize: 13,
@@ -439,13 +439,13 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(239, 68, 68, 0.4)',
     borderWidth: 1,
     borderRadius: 10,
-    padding: 12,
-    marginBottom: 16,
-    gap: 10,
+    padding: 10,
+    marginBottom: 14,
+    gap: 8,
   },
   errorText: {
     color: '#fca5a5',
-    fontSize: 13,
+    fontSize: 12,
     flex: 1,
   },
   successBox: {
@@ -455,35 +455,30 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(16, 185, 129, 0.4)',
     borderWidth: 1,
     borderRadius: 10,
-    padding: 12,
-    marginBottom: 16,
-    gap: 10,
+    padding: 10,
+    marginBottom: 14,
+    gap: 8,
   },
   successText: {
     color: '#86efac',
-    fontSize: 13,
+    fontSize: 12,
     flex: 1,
   },
   card: {
     backgroundColor: 'rgba(20, 27, 43, 0.85)',
-    borderRadius: 16,
-    padding: 20,
+    borderRadius: 14,
+    padding: 16,
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.08)',
-    ...Platform.select({
-      web: {
-        boxShadow: '0 15px 35px rgba(0, 0, 0, 0.6)',
-      },
-    }),
   },
   fieldGroup: {
-    marginBottom: 14,
+    marginBottom: 12,
   },
   label: {
     fontSize: 12,
     fontWeight: '600',
     color: '#94a3b8',
-    marginBottom: 6,
+    marginBottom: 5,
   },
   inputWrapper: {
     flexDirection: 'row',
@@ -493,6 +488,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.12)',
     paddingHorizontal: 12,
+    height: 44,
   },
   inputIcon: {
     marginRight: 8,
@@ -501,12 +497,12 @@ const styles = StyleSheet.create({
     flex: 1,
     height: 44,
     color: '#ffffff',
-    fontSize: 14,
+    fontSize: 13,
   },
   sectionDivider: {
     height: 1,
     backgroundColor: 'rgba(255, 255, 255, 0.08)',
-    marginVertical: 14,
+    marginVertical: 12,
   },
   subSectionHeader: {
     flexDirection: 'row',
@@ -522,12 +518,12 @@ const styles = StyleSheet.create({
   subSectionDesc: {
     fontSize: 11,
     color: '#64748b',
-    marginBottom: 12,
+    marginBottom: 10,
   },
   mlPillRow: {
     flexDirection: 'row',
     gap: 8,
-    marginBottom: 14,
+    marginBottom: 12,
   },
   mlPill: {
     flex: 1,
@@ -537,6 +533,8 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.1)',
     alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 36,
   },
   mlPillActive: {
     backgroundColor: 'rgba(168, 85, 247, 0.2)',
@@ -553,13 +551,13 @@ const styles = StyleSheet.create({
   volunteerBox: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    gap: 12,
+    gap: 10,
     backgroundColor: 'rgba(239, 68, 68, 0.06)',
     borderColor: 'rgba(239, 68, 68, 0.25)',
     borderWidth: 1,
     borderRadius: 10,
-    padding: 12,
-    marginBottom: 16,
+    padding: 10,
+    marginBottom: 14,
   },
   checkbox: {
     width: 20,
@@ -576,7 +574,7 @@ const styles = StyleSheet.create({
     borderColor: '#ef4444',
   },
   volunteerTitle: {
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '700',
     color: '#fda4af',
   },
@@ -589,14 +587,11 @@ const styles = StyleSheet.create({
   submitButton: {
     backgroundColor: '#ef4444',
     borderRadius: 12,
-    paddingVertical: 14,
+    paddingVertical: 13,
     alignItems: 'center',
     marginTop: 6,
-    ...Platform.select({
-      web: {
-        boxShadow: '0 4px 16px rgba(239, 68, 68, 0.45)',
-      },
-    }),
+    minHeight: 46,
+    justifyContent: 'center',
   },
   submitButtonDisabled: {
     opacity: 0.65,
@@ -608,7 +603,7 @@ const styles = StyleSheet.create({
   },
   submitButtonText: {
     color: '#ffffff',
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: '800',
     letterSpacing: 0.3,
   },
@@ -616,46 +611,52 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginTop: 18,
-    gap: 10,
+    marginTop: 14,
+    gap: 8,
   },
   prefillButton: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
     gap: 6,
     backgroundColor: 'rgba(255, 255, 255, 0.05)',
-    paddingVertical: 8,
-    paddingHorizontal: 12,
+    paddingVertical: 9,
+    paddingHorizontal: 10,
     borderRadius: 8,
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.08)',
+    minHeight: 38,
   },
   prefillButtonText: {
     fontSize: 11,
     color: '#94a3b8',
-    fontWeight: '600',
+    fontWeight: '700',
   },
   guestButton: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
     gap: 6,
     backgroundColor: 'rgba(239, 68, 68, 0.08)',
-    paddingVertical: 8,
-    paddingHorizontal: 12,
+    paddingVertical: 9,
+    paddingHorizontal: 10,
     borderRadius: 8,
     borderWidth: 1,
     borderColor: 'rgba(239, 68, 68, 0.25)',
+    minHeight: 38,
   },
   guestButtonText: {
     fontSize: 11,
     color: '#fda4af',
-    fontWeight: '600',
+    fontWeight: '700',
   },
   footerNote: {
-    fontSize: 11,
+    fontSize: 10,
     color: '#475569',
     textAlign: 'center',
-    marginTop: 22,
+    marginTop: 18,
     fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
   },
 });

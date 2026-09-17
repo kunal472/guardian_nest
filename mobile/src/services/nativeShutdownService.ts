@@ -108,7 +108,7 @@ class NativeShutdownService {
    */
   public dispatchPreShutdownBeacon(
     reason: string = 'OS_TERMINATION',
-    backendUrl: string = 'http://localhost:3000',
+    backendUrl: string = 'http://10.44.176.208:3000',
   ): PreShutdownBeaconData {
     const payload: PreShutdownBeaconData = {
       incidentId: this.activeIncidentId || 'inc_preshutdown_lastgasp',

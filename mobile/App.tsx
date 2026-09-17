@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef } from "react";
 import {
   StyleSheet,
   Text,
@@ -13,50 +13,51 @@ import {
   Linking,
   AppState,
   AppStateStatus,
-} from 'react-native';
-import io, { Socket } from 'socket.io-client';
-import { screamDetector, ModelPrediction } from './src/services/screamDetectionService';
-import { CitizenAuth } from './src/components/CitizenAuth';
+} from "react-native";
+import io, { Socket } from "socket.io-client";
+import {
+  screamDetector,
+  ModelPrediction,
+} from "./src/services/screamDetectionService";
+import { CitizenAuth } from "./src/components/CitizenAuth";
 import {
   getStoredCitizenAuth,
   clearStoredCitizenAuth,
   CitizenUser,
-} from './src/services/authService';
+} from "./src/services/authService";
 import {
   hardwareLocationService,
   LocationFix,
-} from './src/services/hardwareLocationService';
+} from "./src/services/hardwareLocationService";
 import {
   hardwareBatteryService,
   BatteryInfo,
   BatteryStateEnum,
-} from './src/services/hardwareBatteryService';
+} from "./src/services/hardwareBatteryService";
 import {
   hardwareSnatchService,
   MotionTelemetry,
   SnatchSensitivity,
-} from './src/services/hardwareSnatchService';
+} from "./src/services/hardwareSnatchService";
 import {
   hardwareAudioVaultService,
   AudioVaultState,
-} from './src/services/hardwareAudioVaultService';
+} from "./src/services/hardwareAudioVaultService";
 import {
   twoTierDistressPipeline,
   PipelineTelemetry,
-} from './src/services/twoTierDistressPipeline';
-import {
-  speakerBiometricsService,
-} from './src/services/speakerBiometricsService';
-import {
-  nativeShutdownService,
-} from './src/services/nativeShutdownService';
-import {
-  emergencySmsService,
-} from './src/services/emergencySmsService';
+} from "./src/services/twoTierDistressPipeline";
+import { speakerBiometricsService } from "./src/services/speakerBiometricsService";
+import { nativeShutdownService } from "./src/services/nativeShutdownService";
+import { emergencySmsService } from "./src/services/emergencySmsService";
 
-const BACKEND_URL = 'http://localhost:3000';
+const BACKEND_URL = "http://10.102.152.26:3000";
 
-type TriggerType = 'MANUAL_SOS' | 'AUDIO_SCREAM' | 'DEVICE_SNATCH' | 'DEAD_MAN_SWITCH';
+type TriggerType =
+  | "MANUAL_SOS"
+  | "AUDIO_SCREAM"
+  | "DEVICE_SNATCH"
+  | "DEAD_MAN_SWITCH";
 
 interface QueuedLocation {
   lat: number;
@@ -78,65 +79,92 @@ export default function App() {
 
   const [isSosActive, setIsSosActive] = useState<boolean>(false);
   const [incidentId, setIncidentId] = useState<string | null>(null);
-  const [triggerType, setTriggerType] = useState<TriggerType>('MANUAL_SOS');
+  const [triggerType, setTriggerType] = useState<TriggerType>("MANUAL_SOS");
   const [responderStatus, setResponderStatus] = useState<string | null>(null);
-  const [isVolunteer, setIsVolunteer] = useState<boolean>(currentUser?.isVolunteer ?? false);
+  const [isVolunteer, setIsVolunteer] = useState<boolean>(
+    currentUser?.isVolunteer ?? false,
+  );
   const [nearbyAlert, setNearbyAlert] = useState<any | null>(null);
   const [isStealthMode, setIsStealthMode] = useState<boolean>(false);
-  const [calculatorInput, setCalculatorInput] = useState<string>('0');
-  const [coords, setCoords] = useState<{ lat: number; lng: number }>({ lat: 40.7128, lng: -74.006 });
+  const [calculatorInput, setCalculatorInput] = useState<string>("0");
+  const [coords, setCoords] = useState<{ lat: number; lng: number }>({
+    lat: 40.7128,
+    lng: -74.006,
+  });
   const [locationAccuracy, setLocationAccuracy] = useState<number | null>(null);
   const [locationSpeed, setLocationSpeed] = useState<number | null>(null);
   const [isHardwareGps, setIsHardwareGps] = useState<boolean>(true);
-  const [isSnatchDetectorActive, setIsSnatchDetectorActive] = useState<boolean>(true);
-  const [motionTelemetry, setMotionTelemetry] = useState<MotionTelemetry | null>(null);
-  const [snatchSensitivity, setSnatchSensitivity] = useState<SnatchSensitivity>('MEDIUM');
+  const [isSnatchDetectorActive, setIsSnatchDetectorActive] =
+    useState<boolean>(true);
+  const [motionTelemetry, setMotionTelemetry] =
+    useState<MotionTelemetry | null>(null);
+  const [snatchSensitivity, setSnatchSensitivity] =
+    useState<SnatchSensitivity>("MEDIUM");
   const [pingCount, setPingCount] = useState<number>(0);
   const [deadmanSeconds, setDeadmanSeconds] = useState<number | null>(null);
 
   // Network & Battery Resilience States
   const [batteryLevel, setBatteryLevel] = useState<number>(85);
-  const [batteryState, setBatteryState] = useState<BatteryStateEnum>('UNPLUGGED');
+  const [batteryState, setBatteryState] =
+    useState<BatteryStateEnum>("UNPLUGGED");
   const [isLowPowerMode, setIsLowPowerMode] = useState<boolean>(false);
   const [isSimulatedOffline, setIsSimulatedOffline] = useState<boolean>(false);
   const [isConnected, setIsConnected] = useState<boolean>(false);
   const [offlineQueue, setOfflineQueue] = useState<QueuedLocation[]>([]);
   const [lastGaspSent, setLastGaspSent] = useState<boolean>(false);
-  const [lastTransmissionMethod, setLastTransmissionMethod] = useState<string>('Standby');
+  const [lastTransmissionMethod, setLastTransmissionMethod] =
+    useState<string>("Standby");
   const [isDevicePoweredOff, setIsDevicePoweredOff] = useState<boolean>(false);
-  const [shutdownLastGaspNotice, setShutdownLastGaspNotice] = useState<string | null>(null);
-  const [dynamicConfigNotice, setDynamicConfigNotice] = useState<string | null>(null);
+  const [shutdownLastGaspNotice, setShutdownLastGaspNotice] = useState<
+    string | null
+  >(null);
+  const [dynamicConfigNotice, setDynamicConfigNotice] = useState<string | null>(
+    null,
+  );
 
   // Two-Tier On-Device ML Distress Pipeline Telemetry
-  const [pipelineTelemetry, setPipelineTelemetry] = useState<PipelineTelemetry>({
-    isPipelineActive: true,
-    tier1Status: 'spotting',
-    tier2Status: 'idle',
-    yamnetConfidence: 0,
-    targetClass: null,
-    wakeWordDetected: null,
-    transcript: null,
-    distressIntent: null,
-    verificationLatencyMs: 0,
-    speakerBiometrics: null,
-    ringBufferFill: 0,
-    ringBufferSeconds: 0,
-    lastEventTimestamp: null,
-  });
+  const [pipelineTelemetry, setPipelineTelemetry] = useState<PipelineTelemetry>(
+    {
+      isPipelineActive: true,
+      tier1Status: "spotting",
+      tier2Status: "idle",
+      yamnetConfidence: 0,
+      targetClass: null,
+      wakeWordDetected: null,
+      transcript: null,
+      distressIntent: null,
+      verificationLatencyMs: 0,
+      speakerBiometrics: null,
+      ringBufferFill: 0,
+      ringBufferSeconds: 0,
+      lastEventTimestamp: null,
+    },
+  );
 
   // Speaker Biometrics Owner Profile State
-  const [speakerProfile, setSpeakerProfile] = useState(() => speakerBiometricsService.getProfile());
+  const [speakerProfile, setSpeakerProfile] = useState(() =>
+    speakerBiometricsService.getProfile(),
+  );
   const [enrollmentNotice, setEnrollmentNotice] = useState<string | null>(null);
+
+  // Interactive 3-Step Live Voice Calibration State
+  const [isCalibratingVoice, setIsCalibratingVoice] = useState<boolean>(false);
+  const [calibrationStep, setCalibrationStep] = useState<number>(1);
+  const [isRecordingVoiceSample, setIsRecordingVoiceSample] =
+    useState<boolean>(false);
+  const [recordedSamplesCount, setRecordedSamplesCount] = useState<number>(0);
 
   // Acoustic Scream ML States
   const [isMlListening, setIsMlListening] = useState<boolean>(false);
-  const [latestMlPrediction, setLatestMlPrediction] = useState<ModelPrediction | null>(null);
-  const [mlSensitivityThreshold, setMlSensitivityThreshold] = useState<number>(0.80);
+  const [latestMlPrediction, setLatestMlPrediction] =
+    useState<ModelPrediction | null>(null);
+  const [mlSensitivityThreshold, setMlSensitivityThreshold] =
+    useState<number>(0.8);
   const [isModelReady, setIsModelReady] = useState<boolean>(true);
 
   // 30-Second Audio Evidence Vault State
   const [audioVault, setAudioVault] = useState<AudioVaultState>({
-    status: 'idle',
+    status: "idle",
     elapsedSeconds: 0,
     remainingSeconds: 30,
     audioMetering: 0,
@@ -147,11 +175,20 @@ export default function App() {
   });
 
   const socketRef = useRef<Socket | null>(null);
-  const streamIntervalRef = useRef<any>(null);
   const coordsRef = useRef(coords);
   const batteryRef = useRef(batteryLevel);
   const isSosActiveRef = useRef(isSosActive);
   const incidentIdRef = useRef(incidentId);
+  const isVolunteerRef = useRef(isVolunteer);
+  const isSimulatedOfflineRef = useRef(isSimulatedOffline);
+  const currentUserRef = useRef(currentUser);
+
+  // Calibration Prompts Guide
+  const CALIBRATION_PROMPTS = [
+    { step: 1, phrase: "Help Me Guardian", desc: "Speak naturally into the phone" },
+    { step: 2, phrase: "Emergency SOS", desc: "Speak with clear authority" },
+    { step: 3, phrase: "Stop It Now", desc: "Speak with loud commanding tone" },
+  ];
 
   // Subscribe to Speaker Biometrics Profile Changes
   useEffect(() => {
@@ -164,7 +201,10 @@ export default function App() {
   // Subscribe to Two-Tier On-Device ML Pipeline
   useEffect(() => {
     twoTierDistressPipeline.setEmergencyCallback((type, metadata) => {
-      console.warn(`[TWO-TIER ML PIPELINE] Emergency escalated via ${metadata.origin}:`, metadata);
+      console.warn(
+        `[TWO-TIER ML PIPELINE] Emergency escalated via ${metadata.origin}:`,
+        metadata,
+      );
       triggerDistress(type);
     });
 
@@ -187,27 +227,7 @@ export default function App() {
     return unsub;
   }, []);
 
-  // Toggle Live AudioWorklet ML Inference Loop
-  const toggleMlListening = async () => {
-    if (isMlListening) {
-      screamDetector.stopListening();
-      setIsMlListening(false);
-      setLatestMlPrediction(null);
-    } else {
-      setIsMlListening(true);
-      screamDetector.startListening(
-        (pred) => {
-          setLatestMlPrediction(pred);
-        },
-        (confidence) => {
-          // Automatic SOS Trigger on verified acoustic scream detection
-          triggerDistress('AUDIO_SCREAM');
-        },
-      );
-    }
-  };
-
-  // Synchronize ref states for synchronous shutdown/unmount callbacks
+  // Synchronize ref states
   useEffect(() => {
     coordsRef.current = coords;
   }, [coords]);
@@ -220,10 +240,66 @@ export default function App() {
   useEffect(() => {
     incidentIdRef.current = incidentId;
   }, [incidentId]);
+  useEffect(() => {
+    isVolunteerRef.current = isVolunteer;
+  }, [isVolunteer]);
+  useEffect(() => {
+    isSimulatedOfflineRef.current = isSimulatedOffline;
+  }, [isSimulatedOffline]);
+  useEffect(() => {
+    currentUserRef.current = currentUser;
+  }, [currentUser]);
+
+  // Handle Interactive Voice Calibration Recorder
+  const handleStartVoiceCalibration = () => {
+    setIsCalibratingVoice(true);
+    setCalibrationStep(1);
+    setRecordedSamplesCount(0);
+    setEnrollmentNotice("Calibration Mode: Ready to capture 3 voice samples.");
+  };
+
+  const handleRecordCalibrationSample = async () => {
+    if (isRecordingVoiceSample) return;
+    setIsRecordingVoiceSample(true);
+    try {
+      const result = await speakerBiometricsService.recordLiveVoiceSample(
+        calibrationStep,
+      );
+      setRecordedSamplesCount(result.totalCompleted);
+
+      if (calibrationStep < 3) {
+        setCalibrationStep((prev) => prev + 1);
+        setEnrollmentNotice(
+          `Sample ${result.sampleIndex}/3 recorded! Next: Prompt ${calibrationStep + 1}.`,
+        );
+      } else {
+        const finalProfile = speakerBiometricsService.finalizeCalibration(
+          currentUser?.id || "owner_custom",
+          currentUser?.name || "Primary Device Owner",
+        );
+        setSpeakerProfile(finalProfile);
+        setIsCalibratingVoice(false);
+        setCalibrationStep(1);
+        setEnrollmentNotice(
+          "🎉 Voice Profile Successfully Enrolled (3/3 Verified Samples)!",
+        );
+        setTimeout(() => setEnrollmentNotice(null), 5000);
+      }
+    } catch (err: any) {
+      Alert.alert(
+        "Microphone Calibration",
+        "Could not capture voice: " + (err?.message || "Check permissions"),
+      );
+    } finally {
+      setIsRecordingVoiceSample(false);
+    }
+  };
 
   // Synchronize telemetry with NativeShutdownService
   useEffect(() => {
-    const contactPhones = currentUser?.emergencyContacts?.map((c) => c.phoneNumber);
+    const contactPhones = currentUser?.emergencyContacts?.map(
+      (c) => c.phoneNumber,
+    );
     nativeShutdownService.updateTelemetry(
       coords.lat,
       coords.lng,
@@ -235,10 +311,13 @@ export default function App() {
   }, [coords, batteryLevel, incidentId, currentUser]);
 
   // Synchronous Pre-Shutdown Last Gasp Dispatcher
-  const dispatchPreShutdownLastGasp = (reason: string = 'OS_SHUTDOWN') => {
-    const beacon = nativeShutdownService.dispatchPreShutdownBeacon(reason, BACKEND_URL);
+  const dispatchPreShutdownLastGasp = (reason: string = "OS_SHUTDOWN") => {
+    const beacon = nativeShutdownService.dispatchPreShutdownBeacon(
+      reason,
+      BACKEND_URL,
+    );
     setShutdownLastGaspNotice(
-      `Final GPS (${beacon.lat.toFixed(5)}, ${beacon.lng.toFixed(5)}) dispatched via Pre-Shutdown Beacon (${beacon.reason}).`
+      `Final GPS (${beacon.lat.toFixed(5)}, ${beacon.lng.toFixed(5)}) dispatched via Pre-Shutdown Beacon (${beacon.reason}).`,
     );
   };
 
@@ -246,7 +325,7 @@ export default function App() {
   useEffect(() => {
     nativeShutdownService.startListening((beacon) => {
       setShutdownLastGaspNotice(
-        `Final GPS (${beacon.lat.toFixed(5)}, ${beacon.lng.toFixed(5)}) dispatched via Pre-Shutdown Beacon (${beacon.reason}).`
+        `Final GPS (${beacon.lat.toFixed(5)}, ${beacon.lng.toFixed(5)}) dispatched via Pre-Shutdown Beacon (${beacon.reason}).`,
       );
     });
 
@@ -258,43 +337,48 @@ export default function App() {
   // Initialize Socket.IO connection
   useEffect(() => {
     const socket = io(BACKEND_URL, {
-      auth: { token: 'demo_mobile_token' },
-      transports: ['websocket', 'polling'],
+      auth: { token: authToken || "demo_mobile_token" },
+      transports: ["websocket", "polling"],
       reconnectionAttempts: 10,
       reconnectionDelay: 1000,
     });
     socketRef.current = socket;
 
-    socket.on('connect', () => {
+    socket.on("connect", () => {
       setIsConnected(true);
-      console.log('Mobile Edge Client connected to Guardian Event Bus');
+      console.log("Mobile Edge Client connected to Guardian Event Bus");
     });
 
-    socket.on('disconnect', () => {
+    socket.on("disconnect", () => {
       setIsConnected(false);
-      console.log('Mobile disconnected from Event Bus');
+      console.log("Mobile disconnected from Event Bus");
     });
 
-    socket.on('distress:acknowledged', (data: any) => {
+    socket.on("distress:acknowledged", (data: any) => {
       setIncidentId(data.incidentId);
       hardwareAudioVaultService.startEvidenceCapture(data.incidentId, 30);
     });
 
-    socket.on('events.responder.status_change', (data: any) => {
+    socket.on("events.responder.status_change", (data: any) => {
       setResponderStatus(data.status);
     });
 
-    socket.on('nearby:broadcast', (alertData: any) => {
+    socket.on("nearby:broadcast", (alertData: any) => {
       setNearbyAlert(alertData);
     });
 
     // Dynamic Edge ML & Hardware Config Synchronization over Event Bus
     const handleConfigBroadcast = (data: any) => {
-      console.log('📡 [EventBus] Dynamic System Config Update Received:', data);
+      console.log("📡 [EventBus] Dynamic System Config Update Received:", data);
 
-      const scream = data.yamnetScreamThreshold ?? data.newWeights?.scream_confidence;
+      const scream =
+        data.yamnetScreamThreshold ?? data.newWeights?.scream_confidence;
       const wakeWord = data.openWakeWordThreshold;
-      const snatchG = data.snatchThresholdG ?? (data.newWeights?.snatch_sensitivity ? data.newWeights.snatch_sensitivity * 4.0 : undefined);
+      const snatchG =
+        data.snatchThresholdG ??
+        (data.newWeights?.snatch_sensitivity
+          ? data.newWeights.snatch_sensitivity * 4.0
+          : undefined);
       const batteryCrit = data.batteryCriticalThreshold;
 
       if (scream !== undefined) {
@@ -310,31 +394,42 @@ export default function App() {
       }
 
       const summaryParts: string[] = [];
-      if (scream !== undefined) summaryParts.push(`Scream: ${(scream * 100).toFixed(0)}%`);
-      if (wakeWord !== undefined) summaryParts.push(`WakeWord: ${(wakeWord * 100).toFixed(0)}%`);
-      if (snatchG !== undefined) summaryParts.push(`Snatch: ${snatchG.toFixed(1)}G`);
-      if (batteryCrit !== undefined) summaryParts.push(`LastGasp: ${(batteryCrit * 100).toFixed(0)}%`);
+      if (scream !== undefined)
+        summaryParts.push(`Scream: ${(scream * 100).toFixed(0)}%`);
+      if (wakeWord !== undefined)
+        summaryParts.push(`WakeWord: ${(wakeWord * 100).toFixed(0)}%`);
+      if (snatchG !== undefined)
+        summaryParts.push(`Snatch: ${snatchG.toFixed(1)}G`);
+      if (batteryCrit !== undefined)
+        summaryParts.push(`LastGasp: ${(batteryCrit * 100).toFixed(0)}%`);
 
-      const notice = `🌐 Dynamic Config Synced: ${summaryParts.join(' • ')}`;
+      const notice = `🌐 Config Synced: ${summaryParts.join(" • ")}`;
       setDynamicConfigNotice(notice);
       setTimeout(() => setDynamicConfigNotice(null), 6000);
     };
 
-    socket.on('events.system.configuration_update', handleConfigBroadcast);
-    socket.on('system:config_update', handleConfigBroadcast);
+    socket.on("events.system.configuration_update", handleConfigBroadcast);
+    socket.on("system:config_update", handleConfigBroadcast);
 
     return () => {
       socket.disconnect();
     };
-  }, []);
+  }, [authToken]);
 
   // Flush Offline Queue when connectivity is restored
   useEffect(() => {
-    if (isConnected && !isSimulatedOffline && offlineQueue.length > 0 && incidentId) {
-      console.log(`[Store-and-Forward] Flushing ${offlineQueue.length} queued breadcrumbs...`);
+    if (
+      isConnected &&
+      !isSimulatedOffline &&
+      offlineQueue.length > 0 &&
+      incidentId
+    ) {
+      console.log(
+        `[Store-and-Forward] Flushing ${offlineQueue.length} queued breadcrumbs...`,
+      );
       offlineQueue.forEach((queued) => {
         if (socketRef.current?.connected) {
-          socketRef.current.emit('location:update', {
+          socketRef.current.emit("location:update", {
             incidentId,
             lat: queued.lat,
             lng: queued.lng,
@@ -349,9 +444,14 @@ export default function App() {
   }, [isConnected, isSimulatedOffline, offlineQueue, incidentId]);
 
   // Transmit coordinate with 3-Tier Network Failover
-  const transmitLocation = async (lat: number, lng: number, currentBattery: number, isLastGasp: boolean = false) => {
+  const transmitLocation = async (
+    lat: number,
+    lng: number,
+    currentBattery: number,
+    isLastGasp: boolean = false,
+  ) => {
     const payload = {
-      incidentId: incidentId || 'inc_pending',
+      incidentId: incidentId || "inc_pending",
       lat,
       lng,
       batteryLevel: currentBattery,
@@ -360,8 +460,18 @@ export default function App() {
     };
 
     if (isSimulatedOffline || !isConnected) {
-      setOfflineQueue((prev) => [...prev, { lat, lng, batteryLevel: currentBattery, timestamp: new Date().toISOString() }]);
-      setLastTransmissionMethod('Buffered in Offline Queue (Store-and-Forward)');
+      setOfflineQueue((prev) => [
+        ...prev,
+        {
+          lat,
+          lng,
+          batteryLevel: currentBattery,
+          timestamp: new Date().toISOString(),
+        },
+      ]);
+      setLastTransmissionMethod(
+        "Buffered in Offline Queue (Store-and-Forward)",
+      );
 
       if (currentBattery <= 5 && !lastGaspSent) {
         triggerSmsFallback(lat, lng, currentBattery);
@@ -371,26 +481,36 @@ export default function App() {
     }
 
     if (socketRef.current && socketRef.current.connected) {
-      socketRef.current.emit('location:update', payload);
+      socketRef.current.emit("location:update", payload);
       setPingCount((c) => c + 1);
-      setLastTransmissionMethod(isLastGasp ? '⚡ LAST GASP via WebSocket' : 'Live WebSocket Stream');
+      setLastTransmissionMethod(
+        isLastGasp ? "⚡ LAST GASP via WebSocket" : "Live WebSocket Stream",
+      );
       return;
     }
 
     try {
       if (incidentId) {
         await fetch(`${BACKEND_URL}/api/incidents/${incidentId}/location`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ lat, lng, batteryLevel: currentBattery }),
         });
         setPingCount((c) => c + 1);
-        setLastTransmissionMethod('HTTP REST Fallback Gateway');
+        setLastTransmissionMethod("HTTP REST Fallback Gateway");
         return;
       }
     } catch {
-      setOfflineQueue((prev) => [...prev, { lat, lng, batteryLevel: currentBattery, timestamp: new Date().toISOString() }]);
-      setLastTransmissionMethod('HTTP Failed -> Buffered to Queue');
+      setOfflineQueue((prev) => [
+        ...prev,
+        {
+          lat,
+          lng,
+          batteryLevel: currentBattery,
+          timestamp: new Date().toISOString(),
+        },
+      ]);
+      setLastTransmissionMethod("HTTP Failed -> Buffered to Queue");
     }
   };
 
@@ -401,102 +521,119 @@ export default function App() {
       lng,
       batteryLevel: batt,
       incidentId: incidentId || undefined,
-      userName: currentUser?.name || 'Citizen User',
+      userName: currentUser?.name || "Citizen User",
       recipients: currentUser?.emergencyContacts?.map((c) => c.phoneNumber),
     });
   };
 
-  // Live GPS Location Streaming via Hardware Location Service (expo-location + Web GPS)
+  // Live GPS Location Streaming via Hardware Location Service
   useEffect(() => {
     if (isDevicePoweredOff) {
       hardwareLocationService.stopTracking();
       return;
     }
 
-    hardwareLocationService.setSimulatedMode(!isHardwareGps, coords);
+    hardwareLocationService.setSimulatedMode(!isHardwareGps, coordsRef.current);
 
     const handleLocationUpdate = (loc: LocationFix) => {
       setCoords({ lat: loc.lat, lng: loc.lng });
       setLocationAccuracy(loc.accuracy ?? null);
       setLocationSpeed(loc.speed ?? null);
 
-      setBatteryLevel((prevBatt) => {
-        const nextBatt = isSosActive ? Math.max(1, prevBatt - (prevBatt > 10 ? 1 : 0.5)) : prevBatt;
-
-        if (nextBatt <= 5 && !lastGaspSent && isSosActive) {
-          setLastGaspSent(true);
-          transmitLocation(loc.lat, loc.lng, nextBatt, true);
-        } else if (isSosActive) {
-          transmitLocation(loc.lat, loc.lng, nextBatt, false);
-        } else if (isVolunteer && socketRef.current?.connected && !isSimulatedOffline) {
-          socketRef.current.emit('volunteer:location_update', {
-            volunteerId: currentUser?.id || 'u_mobile_volunteer',
-            lat: loc.lat,
-            lng: loc.lng,
-          });
-        }
-
-        return nextBatt;
-      });
+      if (isSosActiveRef.current) {
+        transmitLocation(
+          loc.lat,
+          loc.lng,
+          batteryRef.current,
+          batteryRef.current <= 5,
+        );
+      } else if (
+        isVolunteerRef.current &&
+        socketRef.current?.connected &&
+        !isSimulatedOfflineRef.current
+      ) {
+        socketRef.current.emit("volunteer:location_update", {
+          volunteerId: currentUserRef.current?.id || "u_mobile_volunteer",
+          lat: loc.lat,
+          lng: loc.lng,
+        });
+      }
     };
 
-    hardwareLocationService.startTracking(handleLocationUpdate, isSosActive);
+    hardwareLocationService.startTracking(
+      handleLocationUpdate,
+      isSosActiveRef.current,
+    );
 
     return () => {
       hardwareLocationService.stopTracking();
     };
-  }, [isSosActive, incidentId, isVolunteer, isSimulatedOffline, isConnected, lastGaspSent, isDevicePoweredOff, isHardwareGps, currentUser]);
+  }, [isDevicePoweredOff, isHardwareGps]);
 
-  // Live Battery Monitoring via Hardware Battery Service (expo-battery + Web Battery API)
+  // Live Battery Monitoring via Hardware Battery Service
   useEffect(() => {
     hardwareBatteryService.startListening((info: BatteryInfo) => {
       setBatteryLevel(info.level);
       setBatteryState(info.state);
       setIsLowPowerMode(info.isLowPowerMode);
 
-      if (info.isCritical && isSosActive && !lastGaspSent) {
+      if (info.isCritical && !lastGaspSent) {
         setLastGaspSent(true);
-        transmitLocation(coords.lat, coords.lng, info.level, true);
+        dispatchPreShutdownLastGasp("CRITICAL_BATTERY_EVENT");
+        transmitLocation(
+          coordsRef.current.lat,
+          coordsRef.current.lng,
+          info.level,
+          true,
+        );
+        triggerSmsFallback(
+          coordsRef.current.lat,
+          coordsRef.current.lng,
+          info.level,
+        );
       }
     });
 
     return () => {
       hardwareBatteryService.stopListening();
     };
-  }, [isSosActive, lastGaspSent, coords]);
+  }, [lastGaspSent]);
 
-  // High-G Device Snatch Hardware Accelerometer Listener
+  // Accelerometer Snatch Detector Listener
   useEffect(() => {
-    if (isDevicePoweredOff || !isSnatchDetectorActive) {
+    hardwareSnatchService.setSensitivity(snatchSensitivity);
+    if (!isSnatchDetectorActive || isDevicePoweredOff) {
       hardwareSnatchService.stopListening();
       return;
     }
 
-    hardwareSnatchService.setSensitivity(snatchSensitivity);
     hardwareSnatchService.startListening(
       () => {
-        triggerDistress('DEVICE_SNATCH');
+        triggerDistress("DEVICE_SNATCH");
       },
-      (telemetry) => {
-        setMotionTelemetry(telemetry);
-      }
+      (data) => {
+        setMotionTelemetry(data);
+      },
     );
 
     return () => {
       hardwareSnatchService.stopListening();
     };
-  }, [isDevicePoweredOff, isSnatchDetectorActive, snatchSensitivity]);
+  }, [snatchSensitivity, isSnatchDetectorActive, isDevicePoweredOff]);
 
   // Dead Man's Switch Countdown Timer
   useEffect(() => {
     if (deadmanSeconds === null || deadmanSeconds <= 0) return;
+
     const timer = setInterval(() => {
       setDeadmanSeconds((prev) => {
-        if (prev === 1) {
-          triggerDistress('DEAD_MAN_SWITCH');
-          return null;
+        if (prev === null) return null;
+        if (prev <= 1) {
+          clearInterval(timer);
+          triggerDistress("DEAD_MAN_SWITCH");
+          return 0;
         }
-        return prev ? prev - 1 : null;
+        return prev - 1;
       });
     }, 1000);
     return () => clearInterval(timer);
@@ -506,17 +643,21 @@ export default function App() {
   const triggerDistress = (type: TriggerType = triggerType) => {
     setIsSosActive(true);
     setTriggerType(type);
-    setResponderStatus('ALERTING_DISPATCH');
+    setResponderStatus("ALERTING_DISPATCH");
     setLastGaspSent(false);
 
     // Automatically initialize 30s emergency audio evidence capture
     hardwareAudioVaultService.startEvidenceCapture(incidentId || undefined, 30);
 
-    if (socketRef.current && socketRef.current.connected && !isSimulatedOffline) {
-      socketRef.current.emit('distress:triggered', {
-        userId: currentUser?.id || 'u_victim_mobile_01',
-        userName: currentUser?.name || 'Citizen User',
-        phone: currentUser?.phone || '+1555019888',
+    if (
+      socketRef.current &&
+      socketRef.current.connected &&
+      !isSimulatedOffline
+    ) {
+      socketRef.current.emit("distress:triggered", {
+        userId: currentUser?.id || "u_victim_mobile_01",
+        userName: currentUser?.name || "Citizen User",
+        phone: currentUser?.phone || "+1555019888",
         emergencyContacts: currentUser?.emergencyContacts,
         lat: coords.lat,
         lng: coords.lng,
@@ -526,7 +667,7 @@ export default function App() {
       });
     } else {
       setIncidentId(`inc_offline_${Date.now()}`);
-      setLastTransmissionMethod('Triggered in Offline Queue');
+      setLastTransmissionMethod("Triggered in Offline Queue");
       if (batteryLevel <= 5) {
         triggerSmsFallback(coords.lat, coords.lng, Math.round(batteryLevel));
       }
@@ -553,7 +694,7 @@ export default function App() {
 
   // Simulate Sudden Device Shutdown / Battery Depletion Kill
   const handleSimulatedDeviceShutdown = () => {
-    dispatchPreShutdownLastGasp('MANUAL_POWER_OFF_SIMULATION');
+    dispatchPreShutdownLastGasp("MANUAL_POWER_OFF_SIMULATION");
     setIsDevicePoweredOff(true);
   };
 
@@ -565,26 +706,28 @@ export default function App() {
 
   // Stealth Calculator Decoy Logic
   const handleCalcPress = (btn: string) => {
-    if (btn === 'C') {
-      setCalculatorInput('0');
+    if (btn === "C") {
+      setCalculatorInput("0");
       return;
     }
-    if (btn === '=') {
-      if (calculatorInput === '9999') {
+    if (btn === "=") {
+      if (calculatorInput === "9999") {
         setIsStealthMode(false);
-        setCalculatorInput('0');
+        setCalculatorInput("0");
       } else {
         try {
-          const evalResult = String(Function(`'use strict'; return (${calculatorInput})`)());
+          const evalResult = String(
+            Function(`'use strict'; return (${calculatorInput})`)(),
+          );
           setCalculatorInput(evalResult);
         } catch {
-          setCalculatorInput('Error');
+          setCalculatorInput("Error");
         }
       }
       return;
     }
 
-    setCalculatorInput((prev) => (prev === '0' ? btn : prev + btn));
+    setCalculatorInput((prev) => (prev === "0" ? btn : prev + btn));
   };
 
   // Render Citizen Auth if not authenticated and not in guest test mode
@@ -616,12 +759,21 @@ export default function App() {
 
           {shutdownLastGaspNotice && (
             <View style={styles.shutdownNoticeBox}>
-              <Text style={styles.shutdownNoticeTitle}>✅ PRE-SHUTDOWN LAST GASP FIRED</Text>
-              <Text style={styles.shutdownNoticeText}>{shutdownLastGaspNotice}</Text>
+              <Text style={styles.shutdownNoticeTitle}>
+                ✅ PRE-SHUTDOWN LAST GASP FIRED
+              </Text>
+              <Text style={styles.shutdownNoticeText}>
+                {shutdownLastGaspNotice}
+              </Text>
             </View>
           )}
 
-          <TouchableOpacity style={styles.powerOnBtn} onPress={handleDevicePowerOn}>
+          <TouchableOpacity
+            style={styles.powerOnBtn}
+            onPress={handleDevicePowerOn}
+            activeOpacity={0.8}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
             <Text style={styles.powerOnBtnText}>🔌 Power Device Back On</Text>
           </TouchableOpacity>
         </View>
@@ -638,40 +790,70 @@ export default function App() {
           <Text style={styles.calcDisplayText}>{calculatorInput}</Text>
         </View>
         <View style={styles.calcGrid}>
-          {['C', '(', ')', '/', '7', '8', '9', '*', '4', '5', '6', '-', '1', '2', '3', '+', '0', '.', '00', '='].map(
-            (btn) => (
-              <TouchableOpacity
-                key={btn}
-                style={[styles.calcBtn, btn === '=' && styles.calcBtnEqual]}
-                onPress={() => handleCalcPress(btn)}
-              >
-                <Text style={styles.calcBtnText}>{btn}</Text>
-              </TouchableOpacity>
-            ),
-          )}
+          {[
+            "C",
+            "(",
+            ")",
+            "/",
+            "7",
+            "8",
+            "9",
+            "*",
+            "4",
+            "5",
+            "6",
+            "-",
+            "1",
+            "2",
+            "3",
+            "+",
+            "0",
+            ".",
+            "00",
+            "=",
+          ].map((btn) => (
+            <TouchableOpacity
+              key={btn}
+              style={[styles.calcBtn, btn === "=" && styles.calcBtnEqual]}
+              onPress={() => handleCalcPress(btn)}
+              activeOpacity={0.75}
+            >
+              <Text style={styles.calcBtnText}>{btn}</Text>
+            </TouchableOpacity>
+          ))}
         </View>
-        <Text style={styles.calcHint}>Enter PIN 9999 and press = to return</Text>
+        <Text style={styles.calcHint}>
+          Enter PIN 9999 and press = to return
+        </Text>
       </SafeAreaView>
     );
   }
 
   return (
     <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="light-content" />
-      <ScrollView contentContainerStyle={styles.scrollContent}>
+      <StatusBar barStyle="light-content" backgroundColor="#0a0d14" />
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
         {/* Top Header & Citizen Profile Bar */}
         <View style={styles.header}>
-          <View>
+          <View style={{ flex: 1, paddingRight: 8 }}>
             <Text style={styles.headerTitle}>GUARDIAN EDGE</Text>
-            <Text style={styles.headerSubtitle}>
-              {isSosActive ? '🚨 DISTRESS STREAM ACTIVE (1/s)' : 'STANDBY MODE (1/10s)'}
+            <Text style={styles.headerSubtitle} numberOfLines={1}>
+              {isSosActive
+                ? "🚨 DISTRESS STREAM ACTIVE (1/s)"
+                : "STANDBY MODE (1/10s)"}
             </Text>
           </View>
-          
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
             <TouchableOpacity
               style={styles.stealthBtn}
               onPress={() => setIsStealthMode(true)}
+              activeOpacity={0.8}
+              hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
             >
               <Text style={styles.stealthBtnText}>🕵️ Decoy</Text>
             </TouchableOpacity>
@@ -679,6 +861,8 @@ export default function App() {
             <TouchableOpacity
               style={styles.logoutBtn}
               onPress={handleLogout}
+              activeOpacity={0.8}
+              hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
             >
               <Text style={styles.logoutBtnText}>Sign Out</Text>
             </TouchableOpacity>
@@ -688,36 +872,51 @@ export default function App() {
         {/* Citizen Profile Card */}
         {currentUser && (
           <View style={styles.citizenProfileCard}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+            <View
+              style={{ flexDirection: "row", alignItems: "center", gap: 10 }}
+            >
               <View style={styles.citizenAvatar}>
                 <Text style={styles.citizenAvatarText}>
-                  {currentUser.name ? currentUser.name.charAt(0).toUpperCase() : 'C'}
+                  {currentUser.name
+                    ? currentUser.name.charAt(0).toUpperCase()
+                    : "C"}
                 </Text>
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={styles.citizenName}>{currentUser.name || 'Citizen Officer'}</Text>
-                <Text style={styles.citizenPhone}>
-                  {currentUser.phone} • {currentUser.isVolunteer ? '🤝 Community Volunteer' : 'Citizen Protected'}
+                <Text style={styles.citizenName} numberOfLines={1}>
+                  {currentUser.name || "Citizen Officer"}
+                </Text>
+                <Text style={styles.citizenPhone} numberOfLines={1}>
+                  {currentUser.phone} •{" "}
+                  {currentUser.isVolunteer ? "🤝 Volunteer" : "Protected"}
                 </Text>
               </View>
             </View>
 
-            {currentUser.emergencyContacts && currentUser.emergencyContacts.length > 0 && (
-              <View style={styles.emergencyContactPill}>
-                <Text style={styles.emergencyContactPillText}>
-                  🚨 Primary Relay: {currentUser.emergencyContacts[0].contactName} ({currentUser.emergencyContacts[0].phoneNumber})
-                </Text>
-              </View>
-            )}
+            {currentUser.emergencyContacts &&
+              currentUser.emergencyContacts.length > 0 && (
+                <View style={styles.emergencyContactPill}>
+                  <Text
+                    style={styles.emergencyContactPillText}
+                    numberOfLines={1}
+                  >
+                    🚨 Relay: {currentUser.emergencyContacts[0].contactName} (
+                    {currentUser.emergencyContacts[0].phoneNumber})
+                  </Text>
+                </View>
+              )}
           </View>
         )}
 
         {/* Critical Last Gasp Alert Banner */}
         {batteryLevel <= 5 && isSosActive && (
           <View style={styles.lastGaspBanner}>
-            <Text style={styles.lastGaspTitle}>⚡ CRITICAL BATTERY &quot;LAST GASP&quot; TRANSMISSION</Text>
+            <Text style={styles.lastGaspTitle}>
+              ⚡ CRITICAL BATTERY "LAST GASP" TRANSMISSION
+            </Text>
             <Text style={styles.lastGaspSub}>
-              Battery at {Math.round(batteryLevel)}%! Final GPS fix pinned & broadcasted to dispatchers.
+              Battery at {Math.round(batteryLevel)}%! Final GPS fix pinned &
+              broadcasted.
             </Text>
           </View>
         )}
@@ -725,16 +924,24 @@ export default function App() {
         {/* Dynamic Edge ML Remote Sync Banner */}
         {dynamicConfigNotice && (
           <View style={styles.dynamicConfigBanner}>
-            <Text style={styles.dynamicConfigBannerTitle}>⚙️ GLOBAL EDGE ML THRESHOLDS UPDATED</Text>
-            <Text style={styles.dynamicConfigBannerSub}>{dynamicConfigNotice}</Text>
+            <Text style={styles.dynamicConfigBannerTitle}>
+              ⚙️ GLOBAL EDGE ML CONFIG SYNCED
+            </Text>
+            <Text style={styles.dynamicConfigBannerSub}>
+              {dynamicConfigNotice}
+            </Text>
           </View>
         )}
 
         {/* Pre-Shutdown Beacon Feedback Banner */}
         {shutdownLastGaspNotice && (
           <View style={styles.shutdownNoticeBanner}>
-            <Text style={styles.shutdownNoticeBannerTitle}>🛡️ PRE-SHUTDOWN BEACON DISPATCHED</Text>
-            <Text style={styles.shutdownNoticeBannerSub}>{shutdownLastGaspNotice}</Text>
+            <Text style={styles.shutdownNoticeBannerTitle}>
+              🛡️ PRE-SHUTDOWN BEACON DISPATCHED
+            </Text>
+            <Text style={styles.shutdownNoticeBannerSub}>
+              {shutdownLastGaspNotice}
+            </Text>
           </View>
         )}
 
@@ -742,10 +949,12 @@ export default function App() {
         {responderStatus && (
           <View style={styles.responderBanner}>
             <Text style={styles.responderBannerTitle}>
-              {responderStatus === 'DISPATCHED' ? '🚑 RESCUE UNIT EN ROUTE' : '⚠️ DISPATCH NOTIFIED'}
+              {responderStatus === "DISPATCHED"
+                ? "🚑 RESCUE UNIT EN ROUTE"
+                : "⚠️ DISPATCH NOTIFIED"}
             </Text>
             <Text style={styles.responderBannerSub}>
-              Status: {responderStatus} • Units converging via Redis GEO mesh
+              Status: {responderStatus} • Mesh active
             </Text>
           </View>
         )}
@@ -753,9 +962,12 @@ export default function App() {
         {/* Nearby Alert for Volunteers */}
         {nearbyAlert && isVolunteer && (
           <View style={styles.nearbyBanner}>
-            <Text style={styles.nearbyBannerTitle}>🚨 NEARBY DISTRESS DETECTED</Text>
+            <Text style={styles.nearbyBannerTitle}>
+              🚨 NEARBY DISTRESS DETECTED
+            </Text>
             <Text style={styles.nearbyBannerSub}>
-              {nearbyAlert.victimName || 'Victim'} is within {nearbyAlert.distanceMeters || '250'}m!
+              {nearbyAlert.victimName || "Victim"} is within{" "}
+              {nearbyAlert.distanceMeters || "250"}m!
             </Text>
           </View>
         )}
@@ -764,72 +976,118 @@ export default function App() {
         <View style={styles.sosContainer}>
           <TouchableOpacity
             style={[styles.sosButton, isSosActive && styles.sosButtonActive]}
-            activeOpacity={0.8}
-            onPress={() => (isSosActive ? cancelDistress() : triggerDistress('MANUAL_SOS'))}
+            activeOpacity={0.75}
+            onPress={() =>
+              isSosActive ? cancelDistress() : triggerDistress("MANUAL_SOS")
+            }
+            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
           >
-            <Text style={styles.sosText}>{isSosActive ? 'CANCEL' : 'SOS'}</Text>
+            <Text style={styles.sosText}>{isSosActive ? "CANCEL" : "SOS"}</Text>
             <Text style={styles.sosSubtext}>
-              {isSosActive ? 'Tap to Disarm' : 'Hold 3s or Tap'}
+              {isSosActive ? "Tap to Disarm" : "Tap for Emergency"}
             </Text>
           </TouchableOpacity>
         </View>
 
-        {/* Two-Tier On-Device ML Distress Pipeline Dashboard */}
+        {/* Two-Tier On-Device ML Distress Pipeline Card */}
         <View style={styles.card}>
-          <View style={styles.rowBetween}>
+          <View style={styles.cardHeaderRow}>
             <View style={{ flex: 1, paddingRight: 8 }}>
-              <Text style={styles.cardTitle}>Two-Tier Edge ML Distress Pipeline</Text>
+              <Text style={styles.cardTitle}>Two-Tier Edge ML Distress</Text>
               <Text style={styles.cardDesc}>
-                100% Offline On-Device Neural Spotter & Verification Pipeline
+                100% Offline Neural Spotter & Verification
               </Text>
             </View>
-            <View style={[styles.modelStatusBadge, pipelineTelemetry.isPipelineActive && styles.modelStatusBadgeReady]}>
+            <View
+              style={[
+                styles.modelStatusBadge,
+                pipelineTelemetry.isPipelineActive &&
+                  styles.modelStatusBadgeReady,
+              ]}
+            >
               <Text style={styles.modelStatusBadgeText}>
-                {pipelineTelemetry.isPipelineActive ? '🟢 T1+T2 ARMED' : 'OFFLINE'}
+                {pipelineTelemetry.isPipelineActive
+                  ? "🟢 T1+T2 ARMED"
+                  : "OFFLINE"}
               </Text>
             </View>
           </View>
 
-          {/* Tier 1: Always-On Low-Power Spotters & Ring Buffer */}
-          <View style={{ marginTop: 10, padding: 12, borderRadius: 8, backgroundColor: 'rgba(255, 255, 255, 0.03)', borderWidth: 1, borderColor: 'rgba(255, 255, 255, 0.08)' }}>
+          {/* Tier 1: Spotters & Ring Buffer */}
+          <View style={styles.subCard}>
             <View style={styles.rowBetween}>
-              <Text style={{ fontSize: 12, fontWeight: '700', color: '#38bdf8' }}>
-                TIER 1: Always-On Neural Spotters (16kHz PCM)
+              <Text
+                style={{ fontSize: 12, fontWeight: "700", color: "#38bdf8" }}
+              >
+                TIER 1: Always-On Neural Spotters
               </Text>
-              <Text style={{ fontSize: 11, color: pipelineTelemetry.tier1Status === 'spotting' ? '#10b981' : '#f59e0b', fontWeight: '700' }}>
-                {pipelineTelemetry.tier1Status === 'spotting' ? '⚡ SPOTTING' : pipelineTelemetry.tier1Status === 'triggered' ? '🚨 TRIGGERED' : 'IDLE'}
+              <Text
+                style={{
+                  fontSize: 11,
+                  color:
+                    pipelineTelemetry.tier1Status === "spotting"
+                      ? "#10b981"
+                      : "#f59e0b",
+                  fontWeight: "700",
+                }}
+              >
+                {pipelineTelemetry.tier1Status === "spotting"
+                  ? "⚡ SPOTTING"
+                  : pipelineTelemetry.tier1Status === "triggered"
+                    ? "🚨 TRIGGERED"
+                    : "IDLE"}
               </Text>
             </View>
 
-            <View style={[styles.rowBetween, { marginTop: 6 }]}>
+            <View style={styles.metaStack}>
               <Text style={styles.metaLabel}>Spotter A (YAMNet AudioSet):</Text>
-              <Text style={[styles.metaValue, pipelineTelemetry.yamnetConfidence > 0.6 ? { color: '#ef4444', fontWeight: '800' } : { color: '#94a3b8' }]}>
-                {pipelineTelemetry.targetClass ? `${pipelineTelemetry.targetClass} (${(pipelineTelemetry.yamnetConfidence * 100).toFixed(0)}%)` : 'Scream #11 / Yell #9 / Cry #12'}
+              <Text
+                style={[
+                  styles.metaValue,
+                  pipelineTelemetry.yamnetConfidence > 0.6
+                    ? { color: "#ef4444", fontWeight: "800" }
+                    : { color: "#94a3b8" },
+                ]}
+              >
+                {pipelineTelemetry.targetClass
+                  ? `${pipelineTelemetry.targetClass} (${(pipelineTelemetry.yamnetConfidence * 100).toFixed(0)}%)`
+                  : "Scream #11 / Yell #9 / Cry #12"}
               </Text>
             </View>
 
-            <View style={styles.rowBetween}>
-              <Text style={styles.metaLabel}>Spotter B (openWakeWord Zero-Key):</Text>
-              <Text style={[styles.metaValue, pipelineTelemetry.wakeWordDetected ? { color: '#a855f7', fontWeight: '800' } : { color: '#94a3b8' }]}>
-                {pipelineTelemetry.wakeWordDetected ? `"${pipelineTelemetry.wakeWordDetected}" Spotted` : '"Help Me" / "Emergency" / "Hey Guardian"'}
+            <View style={styles.metaStack}>
+              <Text style={styles.metaLabel}>
+                Spotter B (openWakeWord Zero-Key):
+              </Text>
+              <Text
+                style={[
+                  styles.metaValue,
+                  pipelineTelemetry.wakeWordDetected
+                    ? { color: "#a855f7", fontWeight: "800" }
+                    : { color: "#94a3b8" },
+                ]}
+              >
+                {pipelineTelemetry.wakeWordDetected
+                  ? `"${pipelineTelemetry.wakeWordDetected}" Spotted`
+                  : '"Help Me" / "Emergency" / "Hey Guardian"'}
               </Text>
             </View>
 
             {/* 5s Circular Audio Ring Buffer Meter */}
             <View style={{ marginTop: 8 }}>
               <View style={styles.rowBetween}>
-                <Text style={styles.metaLabel}>5s Circular Ring Buffer (Pre/Post Context):</Text>
-                <Text style={[styles.metaValue, { color: '#38bdf8' }]}>
-                  {pipelineTelemetry.ringBufferSeconds.toFixed(1)}s / 5.0s (80,000 samples)
+                <Text style={styles.metaLabel}>5s Audio Ring Buffer:</Text>
+                <Text style={[styles.metaValue, { color: "#38bdf8" }]}>
+                  {pipelineTelemetry.ringBufferSeconds.toFixed(1)}s / 5.0s
                 </Text>
               </View>
-              <View style={[styles.meterTrack, { marginTop: 4 }]}>
+              <View style={styles.meterTrack}>
                 <View
                   style={[
                     styles.meterFill,
                     {
                       width: `${pipelineTelemetry.ringBufferFill}%`,
-                      backgroundColor: '#38bdf8',
+                      backgroundColor: "#38bdf8",
                     },
                   ]}
                 />
@@ -837,106 +1095,262 @@ export default function App() {
             </View>
           </View>
 
-          {/* Speaker Biometrics & Owner Voice Filter (Personalization Engine) */}
-          <View style={{ marginTop: 8, padding: 12, borderRadius: 8, backgroundColor: 'rgba(168, 85, 247, 0.08)', borderWidth: 1, borderColor: 'rgba(168, 85, 247, 0.25)' }}>
-            <View style={styles.rowBetween}>
-              <View>
-                <Text style={{ fontSize: 12, fontWeight: '700', color: '#d8b4fe' }}>
-                  👤 Personalized Speaker Biometrics (16-D Centroid)
+          {/* Speaker Biometrics & Voice Filter */}
+          <View style={[styles.subCard, styles.subCardPurple]}>
+            <View style={styles.cardHeaderRow}>
+              <View style={{ flex: 1, paddingRight: 6 }}>
+                <Text
+                  style={{ fontSize: 12, fontWeight: "700", color: "#d8b4fe" }}
+                >
+                  👤 Speaker Biometrics (16-D Centroid)
                 </Text>
-                <Text style={{ fontSize: 10, color: '#c084fc', marginTop: 1 }}>
-                  Owner: {speakerProfile?.userName || currentUser?.name || 'Primary Owner'} • Enrolled (3 Samples)
+                <Text
+                  style={{ fontSize: 10, color: "#c084fc", marginTop: 1 }}
+                  numberOfLines={1}
+                >
+                  Owner:{" "}
+                  {speakerProfile?.userName || currentUser?.name || "Owner"}
                 </Text>
               </View>
-              <View style={{ backgroundColor: 'rgba(168, 85, 247, 0.2)', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
-                <Text style={{ fontSize: 10, fontWeight: '800', color: '#d8b4fe' }}>
-                  COSINE: &ge; {(speakerBiometricsService.getMatchThreshold() * 100).toFixed(0)}%
+              <View style={styles.badgeSmall}>
+                <Text style={styles.badgeSmallText}>
+                  COSINE &ge;{" "}
+                  {(speakerBiometricsService.getMatchThreshold() * 100).toFixed(
+                    0,
+                  )}
+                  %
                 </Text>
               </View>
             </View>
 
-            {/* Last Verification Telemetry Result */}
             {pipelineTelemetry.speakerBiometrics && (
-              <View style={{ marginTop: 6, padding: 6, borderRadius: 6, backgroundColor: 'rgba(0, 0, 0, 0.3)', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                <Text style={{ fontSize: 10, color: '#94a3b8' }}>Latest Voice Check:</Text>
-                <Text style={{ fontSize: 10, fontWeight: '700', color: pipelineTelemetry.speakerBiometrics.isMatch ? '#34d399' : '#f87171' }}>
+              <View style={styles.telemetryMiniBox}>
+                <Text style={{ fontSize: 10, color: "#94a3b8" }}>
+                  Latest Voice Check:
+                </Text>
+                <Text
+                  style={{
+                    fontSize: 10,
+                    fontWeight: "700",
+                    color: pipelineTelemetry.speakerBiometrics.isMatch
+                      ? "#34d399"
+                      : "#f87171",
+                  }}
+                >
                   {pipelineTelemetry.speakerBiometrics.reason}
                 </Text>
               </View>
             )}
 
             {enrollmentNotice && (
-              <View style={{ marginTop: 6, padding: 6, borderRadius: 6, backgroundColor: 'rgba(16, 185, 129, 0.15)', borderWidth: 1, borderColor: '#10b981' }}>
-                <Text style={{ fontSize: 10, color: '#6ee7b7', fontWeight: '600' }}>
+              <View style={styles.noticeMiniBox}>
+                <Text style={styles.noticeMiniText}>
                   ✨ {enrollmentNotice}
                 </Text>
               </View>
             )}
 
-            {/* Personalization Calibration Actions */}
-            <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
-              <TouchableOpacity
-                style={[styles.mlPill, { backgroundColor: 'rgba(168, 85, 247, 0.2)', borderColor: '#c084fc', flex: 2 }]}
-                onPress={() => {
-                  const newSamples = [
-                    [0.40, 0.45, 0.58, 0.31, 0.63, 0.50, 0.38, 0.54, 0.46, 0.41, 0.60, 0.43, 0.51, 0.55, 0.39, 0.48],
-                    [0.37, 0.41, 0.53, 0.28, 0.59, 0.47, 0.33, 0.50, 0.42, 0.37, 0.56, 0.39, 0.47, 0.51, 0.35, 0.44],
-                    [0.39, 0.43, 0.56, 0.30, 0.61, 0.49, 0.36, 0.52, 0.44, 0.39, 0.58, 0.41, 0.49, 0.53, 0.37, 0.46],
-                  ];
-                  speakerBiometricsService.enrollVoice(
-                    currentUser?.id || 'owner_custom',
-                    currentUser?.name || 'Primary Device Owner',
-                    newSamples,
-                  );
-                  setEnrollmentNotice('Voice Profile Re-Calibrated with 3 Acoustic Samples!');
-                  setTimeout(() => setEnrollmentNotice(null), 4000);
+            {/* Interactive 3-Step Live Voice Calibration Card */}
+            {isCalibratingVoice ? (
+              <View
+                style={{
+                  backgroundColor: "rgba(147, 51, 234, 0.15)",
+                  borderRadius: 8,
+                  padding: 10,
+                  marginTop: 8,
+                  borderWidth: 1,
+                  borderColor: "#a855f7",
                 }}
               >
-                <Text style={[styles.mlPillText, { color: '#e9d5ff' }]}>
-                  🎙️ Calibrate My Voice (3 Utterances)
-                </Text>
-              </TouchableOpacity>
+                <View style={styles.rowBetween}>
+                  <Text
+                    style={{ fontSize: 11, fontWeight: "800", color: "#f3e8ff" }}
+                  >
+                    🎙️ CALIBRATING PROMPT {calibrationStep} OF 3
+                  </Text>
+                  <Text
+                    style={{ fontSize: 10, fontWeight: "700", color: "#c084fc" }}
+                  >
+                    {recordedSamplesCount}/3 Recorded
+                  </Text>
+                </View>
 
-              <TouchableOpacity
-                style={[styles.mlPill, { flex: 1 }]}
-                onPress={() => {
-                  const currentThresh = speakerBiometricsService.getMatchThreshold();
-                  const nextThresh = currentThresh >= 0.80 ? 0.65 : currentThresh >= 0.72 ? 0.80 : 0.72;
-                  speakerBiometricsService.setMatchThreshold(nextThresh);
-                  setEnrollmentNotice(`Cosine Threshold updated to ${(nextThresh * 100).toFixed(0)}%`);
-                  setTimeout(() => setEnrollmentNotice(null), 3000);
-                }}
-              >
-                <Text style={styles.mlPillText}>
-                  ⚙️ {(speakerBiometricsService.getMatchThreshold() * 100).toFixed(0)}% Match
-                </Text>
-              </TouchableOpacity>
-            </View>
+                <View
+                  style={{
+                    backgroundColor: "rgba(0,0,0,0.3)",
+                    padding: 8,
+                    borderRadius: 6,
+                    marginVertical: 6,
+                  }}
+                >
+                  <Text
+                    style={{
+                      fontSize: 13,
+                      fontWeight: "900",
+                      color: "#38bdf8",
+                      textAlign: "center",
+                    }}
+                  >
+                    "{CALIBRATION_PROMPTS[calibrationStep - 1]?.phrase}"
+                  </Text>
+                  <Text
+                    style={{
+                      fontSize: 10,
+                      color: "#94a3b8",
+                      textAlign: "center",
+                      marginTop: 2,
+                    }}
+                  >
+                    {CALIBRATION_PROMPTS[calibrationStep - 1]?.desc}
+                  </Text>
+                </View>
+
+                {/* Live Mic Recording Progress */}
+                {isRecordingVoiceSample && (
+                  <View style={{ marginBottom: 6 }}>
+                    <Text
+                      style={{
+                        fontSize: 10,
+                        color: "#ef4444",
+                        fontWeight: "700",
+                        textAlign: "center",
+                      }}
+                    >
+                      🔴 Capturing 1.5s Audio Spectrum via Microphone...
+                    </Text>
+                    <View style={styles.meterTrack}>
+                      <View
+                        style={[
+                          styles.meterFill,
+                          { width: "100%", backgroundColor: "#ef4444" },
+                        ]}
+                      />
+                    </View>
+                  </View>
+                )}
+
+                <View style={styles.buttonRowResponsive}>
+                  <TouchableOpacity
+                    style={[
+                      styles.actionBtn,
+                      styles.actionBtnPurple,
+                      { flex: 1.5 },
+                      isRecordingVoiceSample && { opacity: 0.6 },
+                    ]}
+                    activeOpacity={0.8}
+                    disabled={isRecordingVoiceSample}
+                    onPress={handleRecordCalibrationSample}
+                  >
+                    <Text style={styles.actionBtnText}>
+                      {isRecordingVoiceSample
+                        ? "🎙️ Recording..."
+                        : `🎙️ Record Sample ${calibrationStep}`}
+                    </Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[styles.actionBtn, { flex: 0.8 }]}
+                    activeOpacity={0.8}
+                    disabled={isRecordingVoiceSample}
+                    onPress={() => setIsCalibratingVoice(false)}
+                  >
+                    <Text style={[styles.actionBtnText, { color: "#94a3b8" }]}>
+                      Cancel
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ) : (
+              <View style={styles.buttonRowResponsive}>
+                <TouchableOpacity
+                  style={[
+                    styles.actionBtn,
+                    styles.actionBtnPurple,
+                    { flex: 1.4 },
+                  ]}
+                  activeOpacity={0.8}
+                  onPress={handleStartVoiceCalibration}
+                >
+                  <Text style={styles.actionBtnText}>
+                    🎙️ Calibrate Voice (3 Prompts)
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.actionBtn, { flex: 1 }]}
+                  activeOpacity={0.8}
+                  onPress={() => {
+                    const currentThresh =
+                      speakerBiometricsService.getMatchThreshold();
+                    const nextThresh =
+                      currentThresh >= 0.8
+                        ? 0.65
+                        : currentThresh >= 0.72
+                          ? 0.8
+                          : 0.72;
+                    speakerBiometricsService.setMatchThreshold(nextThresh);
+                    setEnrollmentNotice(
+                      `Threshold: ${(nextThresh * 100).toFixed(0)}%`,
+                    );
+                    setTimeout(() => setEnrollmentNotice(null), 3000);
+                  }}
+                >
+                  <Text style={styles.actionBtnText}>
+                    ⚙️{" "}
+                    {(
+                      speakerBiometricsService.getMatchThreshold() * 100
+                    ).toFixed(0)}
+                    % Match
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            )}
           </View>
 
           {/* Tier 2: Heavy Whisper Verification & NLP Intent */}
-          <View style={{ marginTop: 8, padding: 12, borderRadius: 8, backgroundColor: 'rgba(239, 68, 68, 0.08)', borderWidth: 1, borderColor: 'rgba(239, 68, 68, 0.2)' }}>
+          <View style={[styles.subCard, styles.subCardRed]}>
             <View style={styles.rowBetween}>
-              <Text style={{ fontSize: 12, fontWeight: '700', color: '#f87171' }}>
-                TIER 2: On-Demand Whisper ASR + NLP Intent
+              <Text
+                style={{ fontSize: 12, fontWeight: "700", color: "#f87171" }}
+              >
+                TIER 2: Whisper ASR + NLP Intent
               </Text>
-              <Text style={{ fontSize: 11, fontWeight: '800', color: pipelineTelemetry.tier2Status === 'escalated' ? '#ef4444' : pipelineTelemetry.tier2Status === 'transcribing' ? '#38bdf8' : '#64748b' }}>
-                {pipelineTelemetry.tier2Status === 'transcribing' ? '🎙️ TRANSCRIBING...' : pipelineTelemetry.tier2Status === 'intent_verifying' ? '🧠 INTENT VERIFY...' : pipelineTelemetry.tier2Status === 'escalated' ? '🚨 FULL SOS ESCALATED' : pipelineTelemetry.tier2Status === 'rejected' ? '❌ REJECTED (Bystander)' : 'STANDBY'}
+              <Text
+                style={{
+                  fontSize: 11,
+                  fontWeight: "800",
+                  color:
+                    pipelineTelemetry.tier2Status === "escalated"
+                      ? "#ef4444"
+                      : pipelineTelemetry.tier2Status === "transcribing"
+                        ? "#38bdf8"
+                        : "#64748b",
+                }}
+              >
+                {pipelineTelemetry.tier2Status === "transcribing"
+                  ? "🎙️ TRANSCRIBING"
+                  : pipelineTelemetry.tier2Status === "intent_verifying"
+                    ? "🧠 VERIFYING"
+                    : pipelineTelemetry.tier2Status === "escalated"
+                      ? "🚨 ESCALATED"
+                      : pipelineTelemetry.tier2Status === "rejected"
+                        ? "❌ REJECTED"
+                        : "STANDBY"}
               </Text>
             </View>
 
             {pipelineTelemetry.transcript && (
-              <View style={{ marginTop: 6, padding: 8, borderRadius: 6, backgroundColor: 'rgba(0, 0, 0, 0.4)' }}>
-                <Text style={{ fontSize: 11, color: '#f8fafc', fontStyle: 'italic' }}>
-                  &quot;{pipelineTelemetry.transcript}&quot;
+              <View style={styles.transcriptBox}>
+                <Text style={styles.transcriptText}>
+                  "{pipelineTelemetry.transcript}"
                 </Text>
                 {pipelineTelemetry.distressIntent && (
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 }}>
-                    <Text style={{ fontSize: 10, fontWeight: '800', color: '#ef4444' }}>
+                  <View style={styles.intentRow}>
+                    <Text style={styles.intentTag}>
                       INTENT: [{pipelineTelemetry.distressIntent}]
                     </Text>
-                    <Text style={{ fontSize: 10, color: '#94a3b8' }}>
-                      • Latency: {pipelineTelemetry.verificationLatencyMs}ms
+                    <Text style={styles.intentLatency}>
+                      • {pipelineTelemetry.verificationLatencyMs}ms
                     </Text>
                   </View>
                 )}
@@ -944,109 +1358,121 @@ export default function App() {
             )}
           </View>
 
-          {/* Interactive ML Pipeline Test Controls */}
+          {/* Test Trigger Simulations */}
           <View style={{ marginTop: 10 }}>
-            <Text style={[styles.metaLabel, { marginBottom: 6 }]}>Test Trigger Simulations:</Text>
-            <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
+            <Text style={[styles.metaLabel, { marginBottom: 6 }]}>
+              Simulate Test Triggers:
+            </Text>
+            <View style={styles.buttonWrapRow}>
               <TouchableOpacity
-                style={[styles.mlPill, { backgroundColor: 'rgba(239, 68, 68, 0.15)', borderColor: '#ef4444' }]}
-                onPress={() => twoTierDistressPipeline.handleScreamSpotterEvent(0.89, 'Scream')}
+                style={[styles.simPill, styles.simPillRed]}
+                activeOpacity={0.8}
+                onPress={() =>
+                  twoTierDistressPipeline.handleScreamSpotterEvent(
+                    0.89,
+                    "Scream",
+                  )
+                }
               >
-                <Text style={[styles.mlPillText, { color: '#fca5a5' }]}>🗣️ Scream (YAMNet #11)</Text>
+                <Text style={[styles.simPillText, { color: "#fca5a5" }]}>
+                  🗣️ Scream (YAMNet)
+                </Text>
               </TouchableOpacity>
 
               <TouchableOpacity
-                style={[styles.mlPill, { backgroundColor: 'rgba(168, 85, 247, 0.15)', borderColor: '#a855f7' }]}
-                onPress={() => twoTierDistressPipeline.handleWakeWordSpotterEvent('Help Me', true)}
+                style={[styles.simPill, styles.simPillPurple]}
+                activeOpacity={0.8}
+                onPress={() =>
+                  twoTierDistressPipeline.handleWakeWordSpotterEvent(
+                    "Help Me",
+                    true,
+                  )
+                }
               >
-                <Text style={[styles.mlPillText, { color: '#d8b4fe' }]}>📢 openWakeWord (Owner)</Text>
+                <Text style={[styles.simPillText, { color: "#d8b4fe" }]}>
+                  📢 WakeWord (Owner)
+                </Text>
               </TouchableOpacity>
 
               <TouchableOpacity
-                style={[styles.mlPill, { backgroundColor: 'rgba(100, 116, 139, 0.2)', borderColor: '#64748b' }]}
-                onPress={() => twoTierDistressPipeline.handleWakeWordSpotterEvent('Help Me', false)}
+                style={[styles.simPill, styles.simPillGray]}
+                activeOpacity={0.8}
+                onPress={() =>
+                  twoTierDistressPipeline.handleWakeWordSpotterEvent(
+                    "Help Me",
+                    false,
+                  )
+                }
               >
-                <Text style={[styles.mlPillText, { color: '#cbd5e1' }]}>👤 Bystander (Reject)</Text>
+                <Text style={[styles.simPillText, { color: "#cbd5e1" }]}>
+                  👤 Bystander (Reject)
+                </Text>
               </TouchableOpacity>
             </View>
-
-            <TouchableOpacity
-              style={{
-                marginTop: 8,
-                paddingVertical: 6,
-                alignItems: 'center',
-              }}
-              onPress={() => twoTierDistressPipeline.resetTelemetry()}
-            >
-              <Text style={{ fontSize: 11, color: '#64748b', fontWeight: '600' }}>
-                🔄 Clear Pipeline Telemetry Log
-              </Text>
-            </TouchableOpacity>
           </View>
         </View>
 
         {/* 30-Second Audio Evidence Vault Card */}
         <View style={styles.card}>
-          <View style={styles.rowBetween}>
+          <View style={styles.cardHeaderRow}>
             <View style={{ flex: 1, paddingRight: 8 }}>
               <Text style={styles.cardTitle}>30s Audio Evidence Vault</Text>
               <Text style={styles.cardDesc}>
-                {audioVault.status === 'recording'
+                {audioVault.status === "recording"
                   ? `Recording Emergency Audio (${audioVault.remainingSeconds}s remaining)`
-                  : audioVault.status === 'uploading'
-                  ? 'Transmitting encrypted audio payload to vault...'
-                  : audioVault.status === 'secured'
-                  ? 'Evidence locked in AES-256 Vault'
-                  : 'Captures high-fidelity 30s audio buffer upon emergency trigger'}
+                  : audioVault.status === "uploading"
+                    ? "Transmitting encrypted payload to vault..."
+                    : audioVault.status === "secured"
+                      ? "Evidence secured in Vault"
+                      : "Captures 30s audio evidence upon SOS"}
               </Text>
             </View>
             <View
               style={[
                 styles.modelStatusBadge,
-                audioVault.status === 'recording'
-                  ? { backgroundColor: 'rgba(239, 68, 68, 0.2)', borderColor: '#ef4444' }
-                  : audioVault.status === 'secured'
-                  ? styles.modelStatusBadgeReady
-                  : {},
+                audioVault.status === "recording"
+                  ? styles.modelStatusBadgeRed
+                  : audioVault.status === "secured"
+                    ? styles.modelStatusBadgeReady
+                    : {},
               ]}
             >
               <Text
                 style={[
                   styles.modelStatusBadgeText,
-                  audioVault.status === 'recording'
-                    ? { color: '#f87171' }
-                    : audioVault.status === 'secured'
-                    ? { color: '#34d399' }
-                    : {},
+                  audioVault.status === "recording"
+                    ? { color: "#f87171" }
+                    : audioVault.status === "secured"
+                      ? { color: "#34d399" }
+                      : {},
                 ]}
               >
-                {audioVault.status === 'recording'
-                  ? `🔴 REC (${audioVault.remainingSeconds}s)`
-                  : audioVault.status === 'uploading'
-                  ? 'UPLOADING'
-                  : audioVault.status === 'secured'
-                  ? 'VAULT SECURED'
-                  : 'ARMED'}
+                {audioVault.status === "recording"
+                  ? `🔴 REC ${audioVault.remainingSeconds}s`
+                  : audioVault.status === "uploading"
+                    ? "UPLOADING"
+                    : audioVault.status === "secured"
+                      ? "SECURED"
+                      : "ARMED"}
               </Text>
             </View>
           </View>
 
-          {/* Real-Time Audio Level Spectrum Visualizer */}
-          {audioVault.status === 'recording' && (
-            <View style={{ marginTop: 10, marginBottom: 8 }}>
+          {audioVault.status === "recording" && (
+            <View style={{ marginTop: 8, marginBottom: 6 }}>
               <View style={styles.rowBetween}>
                 <Text style={styles.metaLabel}>Mic Amplitude Level:</Text>
-                <Text style={[styles.metaValue, { color: '#ef4444', fontWeight: '800' }]}>
-                  {audioVault.audioMetering}% (16kHz AAC/PCM)
+                <Text style={[styles.metaValue, { color: "#ef4444" }]}>
+                  {audioVault.audioMetering}% (16kHz PCM)
                 </Text>
               </View>
-              <View style={[styles.meterTrack, { marginTop: 6 }]}>
+              <View style={styles.meterTrack}>
                 <View
                   style={[
                     styles.meterFill,
                     {
                       width: `${audioVault.audioMetering}%`,
-                      backgroundColor: '#ef4444',
+                      backgroundColor: "#ef4444",
                     },
                   ]}
                 />
@@ -1055,229 +1481,336 @@ export default function App() {
           )}
 
           {audioVault.uploadedUrl && (
-            <View style={{ marginTop: 8, padding: 8, borderRadius: 6, backgroundColor: 'rgba(56, 189, 248, 0.1)', borderWidth: 1, borderColor: 'rgba(56, 189, 248, 0.2)' }}>
-              <Text style={{ fontSize: 11, color: '#38bdf8', fontWeight: '600' }}>
-                🔒 Vault Ref: {audioVault.uploadedUrl}
+            <View style={styles.vaultRefBox}>
+              <Text style={styles.vaultRefText} numberOfLines={2}>
+                🔒 Vault: {audioVault.uploadedUrl}
               </Text>
             </View>
           )}
 
-          <View style={{ flexDirection: 'row', gap: 10, marginTop: 12 }}>
-            <TouchableOpacity
-              style={[
-                styles.mlToggleBtn,
-                { flex: 1, marginTop: 0 },
-                audioVault.status === 'recording' && styles.mlToggleBtnActive,
-              ]}
-              onPress={() => {
-                if (audioVault.status === 'recording') {
-                  hardwareAudioVaultService.stopAndSecure(BACKEND_URL, authToken || undefined);
-                } else {
-                  hardwareAudioVaultService.startEvidenceCapture(incidentId || undefined, 30);
-                }
-              }}
-            >
-              <Text style={styles.mlToggleBtnText}>
-                {audioVault.status === 'recording'
-                  ? '⏹️ Stop & Transmit to Vault'
-                  : '🎙️ Record 30s Audio Evidence'}
-              </Text>
-            </TouchableOpacity>
-          </View>
+          <TouchableOpacity
+            style={[
+              styles.mlToggleBtn,
+              audioVault.status === "recording" && styles.mlToggleBtnActive,
+            ]}
+            activeOpacity={0.8}
+            onPress={() => {
+              if (audioVault.status === "recording") {
+                hardwareAudioVaultService.stopAndSecure(
+                  BACKEND_URL,
+                  authToken || undefined,
+                );
+              } else {
+                hardwareAudioVaultService.startEvidenceCapture(
+                  incidentId || undefined,
+                  30,
+                );
+              }
+            }}
+          >
+            <Text style={styles.mlToggleBtnText}>
+              {audioVault.status === "recording"
+                ? "⏹️ Stop & Transmit to Vault"
+                : "🎙️ Record 30s Audio Evidence"}
+            </Text>
+          </TouchableOpacity>
         </View>
 
-        {/* Network & Battery Resiliency Center */}
+        {/* Network & Battery Resiliency Card */}
         <View style={styles.card}>
-          <View style={styles.rowBetween}>
-            <Text style={styles.cardTitle}>Network Resiliency & Pre-Shutdown Armor</Text>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+          <View style={styles.cardHeaderRow}>
+            <Text style={styles.cardTitle}>Network & Battery Armor</Text>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
               {isLowPowerMode && (
-                <View style={{ backgroundColor: 'rgba(245, 158, 11, 0.2)', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
-                  <Text style={{ fontSize: 10, color: '#fbbf24', fontWeight: '800' }}>LOW POWER</Text>
+                <View style={styles.badgeSmallOrange}>
+                  <Text style={styles.badgeSmallOrangeText}>LOW POWER</Text>
                 </View>
               )}
-              <Text style={{ fontSize: 11, fontWeight: '700', color: batteryState === 'CHARGING' ? '#10b981' : '#94a3b8' }}>
-                {batteryState === 'CHARGING' ? '⚡ CHARGING' : batteryState === 'FULL' ? '🔋 FULL' : '🔋 UNPLUGGED'}
-              </Text>
-            </View>
-          </View>
-          
-          <View style={styles.rowBetween}>
-            <Text style={styles.metaLabel}>Battery Level:</Text>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-              <Text style={[styles.metaValue, batteryLevel <= 10 ? { color: '#ef4444' } : { color: '#10b981' }]}>
-                {Math.round(batteryLevel)}% {batteryLevel <= 5 ? '(Last Gasp Pinned)' : ''}
+              <Text
+                style={{
+                  fontSize: 11,
+                  fontWeight: "700",
+                  color: batteryState === "CHARGING" ? "#10b981" : "#94a3b8",
+                }}
+              >
+                {batteryState === "CHARGING"
+                  ? "⚡ CHARGING"
+                  : batteryState === "FULL"
+                    ? "🔋 FULL"
+                    : "🔋 UNPLUGGED"}
               </Text>
             </View>
           </View>
 
-          {/* Simulated Battery Controls */}
-          <View style={styles.batteryPresetRow}>
-            <Text style={styles.metaLabel}>Simulate QA:</Text>
-            <TouchableOpacity style={styles.battBtn} onPress={() => hardwareBatteryService.setSimulatedLevel(100, (i) => setBatteryLevel(i.level))}>
+          <View style={styles.rowBetween}>
+            <Text style={styles.metaLabel}>Battery Level:</Text>
+            <Text
+              style={[
+                styles.metaValue,
+                batteryLevel <= 10
+                  ? { color: "#ef4444" }
+                  : { color: "#10b981" },
+              ]}
+            >
+              {Math.round(batteryLevel)}%{" "}
+              {batteryLevel <= 5 ? "(Last Gasp)" : ""}
+            </Text>
+          </View>
+
+          {/* QA Simulated Battery Buttons */}
+          <Text style={[styles.metaLabel, { marginTop: 8, marginBottom: 4 }]}>
+            Simulate Battery QA:
+          </Text>
+          <View style={styles.buttonWrapRow}>
+            <TouchableOpacity
+              style={styles.battBtn}
+              activeOpacity={0.75}
+              onPress={() => {
+                hardwareBatteryService.setSimulatedLevel(100, (i) =>
+                  setBatteryLevel(i.level),
+                );
+                setBatteryLevel(100);
+              }}
+            >
               <Text style={styles.battBtnText}>100%</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.battBtn} onPress={() => hardwareBatteryService.setSimulatedLevel(15, (i) => setBatteryLevel(i.level))}>
+            <TouchableOpacity
+              style={styles.battBtn}
+              activeOpacity={0.75}
+              onPress={() => {
+                hardwareBatteryService.setSimulatedLevel(15, (i) =>
+                  setBatteryLevel(i.level),
+                );
+                setBatteryLevel(15);
+              }}
+            >
               <Text style={styles.battBtnText}>15%</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={[styles.battBtn, styles.battBtnCritical]} onPress={() => hardwareBatteryService.setSimulatedLevel(4, (i) => setBatteryLevel(i.level))}>
+            <TouchableOpacity
+              style={[styles.battBtn, styles.battBtnCritical]}
+              activeOpacity={0.75}
+              onPress={() => {
+                hardwareBatteryService.setSimulatedLevel(4, (i) =>
+                  setBatteryLevel(i.level),
+                );
+                setBatteryLevel(4);
+                setLastGaspSent(true);
+                dispatchPreShutdownLastGasp("MANUAL_CRITICAL_BATTERY_QA");
+                transmitLocation(coordsRef.current.lat, coordsRef.current.lng, 4, true);
+                triggerSmsFallback(coordsRef.current.lat, coordsRef.current.lng, 4);
+              }}
+            >
               <Text style={styles.battBtnCriticalText}>4% (Dying)</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.battBtn} onPress={() => hardwareBatteryService.setSimulatedLevel(null, () => hardwareBatteryService.getBatterySnapshot().then(i => setBatteryLevel(i.level)))}>
+            <TouchableOpacity
+              style={styles.battBtn}
+              activeOpacity={0.75}
+              onPress={() => {
+                hardwareBatteryService.setSimulatedLevel(null);
+                hardwareBatteryService
+                  .getBatterySnapshot()
+                  .then((i) => setBatteryLevel(i.level));
+              }}
+            >
               <Text style={styles.battBtnText}>🔄 Real</Text>
             </TouchableOpacity>
           </View>
 
           <View style={styles.divider} />
 
-          {/* Pre-Shutdown Last Gasp Simulator Button */}
-          <View style={styles.rowBetween}>
-            <Text style={styles.metaLabel}>Pre-Shutdown Hook:</Text>
-            <Text style={[styles.metaValue, { color: '#10b981' }]}>Active (AppState + Beacon)</Text>
-          </View>
-
           <TouchableOpacity
             style={styles.shutdownSimBtn}
+            activeOpacity={0.8}
             onPress={handleSimulatedDeviceShutdown}
           >
-            <Text style={styles.shutdownSimBtnText}>⚡ Simulate Sudden Device Shutdown</Text>
+            <Text style={styles.shutdownSimBtnText}>
+              ⚡ Simulate Sudden OS Shutdown (Pre-Shutdown Hook)
+            </Text>
           </TouchableOpacity>
 
           <View style={styles.divider} />
 
-          {/* Network Connection & Offline Simulation */}
-          <View style={styles.rowBetween}>
-            <Text style={styles.metaLabel}>Active Transmission Pipeline:</Text>
-            <Text style={styles.metaValue}>{lastTransmissionMethod}</Text>
+          <View style={styles.metaStack}>
+            <Text style={styles.metaLabel}>Transmission Pipeline:</Text>
+            <Text style={styles.metaValue} numberOfLines={1}>
+              {lastTransmissionMethod}
+            </Text>
           </View>
 
           <View style={styles.rowBetween}>
-            <Text style={styles.metaLabel}>Offline Queue (Store & Forward):</Text>
-            <Text style={[styles.metaValue, offlineQueue.length > 0 ? { color: '#f97316' } : {}]}>
+            <Text style={styles.metaLabel}>Offline Queue:</Text>
+            <Text
+              style={[
+                styles.metaValue,
+                offlineQueue.length > 0 ? { color: "#f97316" } : {},
+              ]}
+            >
               {offlineQueue.length} Pings Buffered
             </Text>
           </View>
 
-          <View style={{ flexDirection: 'row', gap: 10, marginTop: 10 }}>
+          <View style={styles.buttonRowResponsive}>
             <TouchableOpacity
-              style={[styles.simNetBtn, isSimulatedOffline && styles.simNetBtnActive]}
+              style={[
+                styles.actionBtn,
+                isSimulatedOffline && styles.actionBtnRed,
+                { flex: 1 },
+              ]}
+              activeOpacity={0.8}
               onPress={() => setIsSimulatedOffline(!isSimulatedOffline)}
             >
-              <Text style={styles.simNetBtnText}>
-                {isSimulatedOffline ? '📶 Reconnect Network' : '❌ Simulate Network Drop'}
+              <Text style={styles.actionBtnText}>
+                {isSimulatedOffline ? "📶 Reconnect" : "❌ Drop Network"}
               </Text>
             </TouchableOpacity>
 
             <TouchableOpacity
-              style={styles.smsActionBtn}
-              onPress={() => triggerSmsFallback(coords.lat, coords.lng, Math.round(batteryLevel))}
+              style={[styles.actionBtn, styles.actionBtnBlue, { flex: 1 }]}
+              activeOpacity={0.8}
+              onPress={() =>
+                triggerSmsFallback(
+                  coords.lat,
+                  coords.lng,
+                  Math.round(batteryLevel),
+                )
+              }
             >
-              <Text style={styles.smsActionBtnText}>📱 Send Emergency SMS</Text>
+              <Text style={[styles.actionBtnText, { color: "#93c5fd" }]}>
+                📱 Emergency SMS
+              </Text>
             </TouchableOpacity>
           </View>
         </View>
 
-        {/* GPS Stream Telemetry Card */}
+        {/* Live GPS Telemetry Card */}
         <View style={styles.card}>
-          <View style={styles.rowBetween}>
-            <Text style={styles.cardTitle}>Live Geospatial Telemetry</Text>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-              <Text style={{ fontSize: 11, fontWeight: '700', color: isHardwareGps ? '#10b981' : '#f59e0b' }}>
-                {isHardwareGps ? '🛰️ HARDWARE GPS' : '🎮 SIMULATED'}
-              </Text>
-            </View>
+          <View style={styles.cardHeaderRow}>
+            <Text style={styles.cardTitle}>Live Geospatial GPS</Text>
+            <Text
+              style={{
+                fontSize: 11,
+                fontWeight: "700",
+                color: isHardwareGps ? "#10b981" : "#f59e0b",
+              }}
+            >
+              {isHardwareGps ? "🛰️ HARDWARE GPS" : "🎮 SIMULATED"}
+            </Text>
           </View>
 
           <View style={styles.rowBetween}>
-            <Text style={styles.metaLabel}>GPS Coordinates:</Text>
-            <Text style={styles.metaValue}>{coords.lat.toFixed(5)}, {coords.lng.toFixed(5)}</Text>
+            <Text style={styles.metaLabel}>Coordinates:</Text>
+            <Text style={styles.metaValue}>
+              {coords.lat.toFixed(5)}, {coords.lng.toFixed(5)}
+            </Text>
           </View>
-          
+
           <View style={styles.rowBetween}>
-            <Text style={styles.metaLabel}>Fix Accuracy:</Text>
-            <Text style={[styles.metaValue, { color: locationAccuracy && locationAccuracy < 10 ? '#10b981' : '#38bdf8' }]}>
-              {locationAccuracy ? `±${locationAccuracy.toFixed(1)}m (High Accuracy)` : 'Locating Satellites...'}
+            <Text style={styles.metaLabel}>Accuracy:</Text>
+            <Text
+              style={[
+                styles.metaValue,
+                {
+                  color:
+                    locationAccuracy && locationAccuracy < 10
+                      ? "#10b981"
+                      : "#38bdf8",
+                },
+              ]}
+            >
+              {locationAccuracy
+                ? `±${locationAccuracy.toFixed(1)}m`
+                : "Fixing..."}
             </Text>
           </View>
 
           {locationSpeed !== null && locationSpeed !== undefined && (
             <View style={styles.rowBetween}>
-              <Text style={styles.metaLabel}>Movement Velocity:</Text>
-              <Text style={styles.metaValue}>{(locationSpeed * 3.6).toFixed(1)} km/h</Text>
+              <Text style={styles.metaLabel}>Speed:</Text>
+              <Text style={styles.metaValue}>
+                {(locationSpeed * 3.6).toFixed(1)} km/h
+              </Text>
             </View>
           )}
 
           <View style={styles.rowBetween}>
-            <Text style={styles.metaLabel}>Pings Streamed:</Text>
+            <Text style={styles.metaLabel}>Streamed Pings:</Text>
             <Text style={styles.metaValue}>{pingCount} updates</Text>
           </View>
 
-          <View style={styles.rowBetween}>
-            <Text style={styles.metaLabel}>Throttling Policy:</Text>
-            <Text style={styles.metaValue}>
-              {isSosActive ? 'High-Frequency (1000ms)' : 'Battery Saver (10000ms)'}
-            </Text>
-          </View>
+          <View style={styles.buttonRowResponsive}>
+            <TouchableOpacity
+              style={[styles.actionBtn, { flex: 1 }]}
+              activeOpacity={0.8}
+              onPress={async () => {
+                const fix = await hardwareLocationService.forceRefreshLocation();
+                setCoords({ lat: fix.lat, lng: fix.lng });
+                if (fix.accuracy) setLocationAccuracy(fix.accuracy);
+                if (fix.speed) setLocationSpeed(fix.speed);
+              }}
+            >
+              <Text style={styles.actionBtnText}>🔄 Force GPS Poll</Text>
+            </TouchableOpacity>
 
-          <TouchableOpacity
-            style={{
-              marginTop: 10,
-              paddingVertical: 8,
-              paddingHorizontal: 12,
-              borderRadius: 8,
-              backgroundColor: 'rgba(255, 255, 255, 0.05)',
-              borderWidth: 1,
-              borderColor: 'rgba(255, 255, 255, 0.1)',
-              alignItems: 'center',
-            }}
-            onPress={() => setIsHardwareGps(!isHardwareGps)}
-          >
-            <Text style={{ fontSize: 12, color: '#94a3b8', fontWeight: '600' }}>
-              {isHardwareGps ? 'Switch to Test Simulation Wander' : 'Switch to Real Satellite GPS'}
-            </Text>
-          </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.actionBtn, styles.actionBtnPurple, { flex: 1.2 }]}
+              activeOpacity={0.8}
+              onPress={() => setIsHardwareGps(!isHardwareGps)}
+            >
+              <Text style={[styles.actionBtnText, { color: "#d8b4fe" }]}>
+                {isHardwareGps
+                  ? "Switch to Sim GPS"
+                  : "Switch to Real GPS"}
+              </Text>
+            </TouchableOpacity>
+          </View>
         </View>
 
-        {/* Hardware Accelerometer Snatch Armor Card */}
+        {/* Device Snatch Accelerometer Card */}
         <View style={styles.card}>
-          <View style={styles.rowBetween}>
-            <Text style={styles.cardTitle}>Device Snatch Armor (Accelerometer)</Text>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-              <Text style={{ fontSize: 11, fontWeight: '700', color: isSnatchDetectorActive ? '#10b981' : '#64748b' }}>
-                {isSnatchDetectorActive ? '⚡ 20 Hz ACTIVE' : 'PAUSED'}
-              </Text>
-            </View>
+          <View style={styles.cardHeaderRow}>
+            <Text style={styles.cardTitle}>Device Snatch Armor</Text>
+            <Text
+              style={{
+                fontSize: 11,
+                fontWeight: "700",
+                color: isSnatchDetectorActive ? "#10b981" : "#64748b",
+              }}
+            >
+              {isSnatchDetectorActive ? "⚡ 20 Hz ACTIVE" : "PAUSED"}
+            </Text>
           </View>
 
           {motionTelemetry && (
-            <View style={{ marginTop: 8, marginBottom: 12 }}>
+            <View style={{ marginTop: 6, marginBottom: 8 }}>
               <View style={styles.rowBetween}>
-                <Text style={styles.metaLabel}>Instantaneous G-Force:</Text>
+                <Text style={styles.metaLabel}>G-Force Magnitude:</Text>
                 <Text
                   style={[
                     styles.metaValue,
                     motionTelemetry.isSpike
-                      ? { color: '#ef4444', fontWeight: '900' }
-                      : { color: '#38bdf8' },
+                      ? { color: "#ef4444", fontWeight: "900" }
+                      : { color: "#38bdf8" },
                   ]}
                 >
-                  {motionTelemetry.magnitude.toFixed(2)} G {motionTelemetry.isSpike ? '💥 (SNATCH SPIKE!)' : '(Baseline 1.0G)'}
+                  {motionTelemetry.magnitude.toFixed(2)} G{" "}
+                  {motionTelemetry.isSpike ? "💥 SPIKE!" : ""}
                 </Text>
               </View>
 
               <View style={styles.rowBetween}>
-                <Text style={styles.metaLabel}>3-Axis Vector [X, Y, Z]:</Text>
-                <Text style={[styles.metaValue, { fontFamily: 'monospace', fontSize: 11 }]}>
-                  [{motionTelemetry.x.toFixed(2)}, {motionTelemetry.y.toFixed(2)}, {motionTelemetry.z.toFixed(2)}]
+                <Text style={styles.metaLabel}>Vector [X, Y, Z]:</Text>
+                <Text style={[styles.metaValue, { fontSize: 11 }]}>
+                  [{motionTelemetry.x.toFixed(1)}, {motionTelemetry.y.toFixed(1)}, {motionTelemetry.z.toFixed(1)}]
                 </Text>
               </View>
 
-              {/* Real-time Acceleration Bar */}
-              <View style={[styles.meterTrack, { marginTop: 6 }]}>
+              <View style={styles.meterTrack}>
                 <View
                   style={[
                     styles.meterFill,
-                    { width: `${Math.min(100, (motionTelemetry.magnitude / 5.0) * 100)}%` },
+                    {
+                      width: `${Math.min(100, (motionTelemetry.magnitude / 5.0) * 100)}%`,
+                    },
                     motionTelemetry.isSpike && styles.meterFillAlert,
                   ]}
                 />
@@ -1285,16 +1818,18 @@ export default function App() {
             </View>
           )}
 
-          {/* Snatch Sensitivity Selector */}
-          <Text style={[styles.metaLabel, { marginBottom: 6 }]}>Snatch Jerk Trigger Threshold:</Text>
-          <View style={{ flexDirection: 'row', gap: 8, marginBottom: 12 }}>
-            {(['LOW', 'MEDIUM', 'HIGH'] as const).map((lvl) => (
+          <Text style={[styles.metaLabel, { marginBottom: 6 }]}>
+            Snatch Sensitivity:
+          </Text>
+          <View style={styles.buttonRowResponsive}>
+            {(["LOW", "MEDIUM", "HIGH"] as const).map((lvl) => (
               <TouchableOpacity
                 key={lvl}
                 style={[
                   styles.mlPill,
                   snatchSensitivity === lvl && styles.mlPillActive,
                 ]}
+                activeOpacity={0.8}
                 onPress={() => setSnatchSensitivity(lvl)}
               >
                 <Text
@@ -1303,77 +1838,97 @@ export default function App() {
                     snatchSensitivity === lvl && styles.mlPillTextActive,
                   ]}
                 >
-                  {lvl} {lvl === 'LOW' ? '(4.2G)' : lvl === 'MEDIUM' ? '(3.2G)' : '(2.2G)'}
+                  {lvl}{" "}
+                  {lvl === "LOW"
+                    ? "(4.2G)"
+                    : lvl === "MEDIUM"
+                      ? "(3.2G)"
+                      : "(2.2G)"}
                 </Text>
               </TouchableOpacity>
             ))}
           </View>
 
-          {/* Action Row */}
-          <View style={{ flexDirection: 'row', gap: 10 }}>
+          <View style={[styles.buttonRowResponsive, { marginTop: 10 }]}>
             <TouchableOpacity
-              style={[styles.simNetBtn, { flex: 1, backgroundColor: 'rgba(239, 68, 68, 0.15)', borderColor: '#ef4444' }]}
+              style={[styles.actionBtn, styles.actionBtnRed, { flex: 1 }]}
+              activeOpacity={0.8}
               onPress={() => hardwareSnatchService.simulateSnatchJerk()}
             >
-              <Text style={[styles.simNetBtnText, { color: '#fda4af' }]}>
+              <Text style={[styles.actionBtnText, { color: "#fda4af" }]}>
                 📱 Simulate Snatch Jerk
               </Text>
             </TouchableOpacity>
 
             <TouchableOpacity
-              style={[styles.simNetBtn, { flex: 1 }]}
+              style={[styles.actionBtn, { flex: 1 }]}
+              activeOpacity={0.8}
               onPress={() => setIsSnatchDetectorActive(!isSnatchDetectorActive)}
             >
-              <Text style={styles.simNetBtnText}>
-                {isSnatchDetectorActive ? '🛑 Pause Snatch' : '▶️ Resume Snatch'}
+              <Text style={styles.actionBtnText}>
+                {isSnatchDetectorActive ? "🛑 Pause" : "▶️ Resume"}
               </Text>
             </TouchableOpacity>
           </View>
         </View>
 
-        {/* Dead Man's Switch Safety Timer */}
+        {/* Dead Man's Switch Timer Card */}
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>{"Dead Man's Switch Timer"}</Text>
+          <Text style={styles.cardTitle}>Dead Man's Switch Timer</Text>
           <Text style={styles.cardDesc}>
-            Triggers automatic SOS distress if you do not check-in before the timer hits zero.
+            Triggers automatic SOS if check-in expires before timer completes.
           </Text>
           {deadmanSeconds ? (
             <View style={styles.timerActiveRow}>
-              <Text style={styles.timerCountdown}>⏰ {deadmanSeconds}s Remaining</Text>
+              <Text style={styles.timerCountdown}>
+                ⏰ {deadmanSeconds}s Remaining
+              </Text>
               <TouchableOpacity
                 style={styles.timerCancelBtn}
+                activeOpacity={0.8}
                 onPress={() => setDeadmanSeconds(null)}
               >
-                <Text style={styles.timerCancelText}>Disarm Timer</Text>
+                <Text style={styles.timerCancelText}>Disarm</Text>
               </TouchableOpacity>
             </View>
           ) : (
-            <View style={styles.timerPresetRow}>
+            <View style={styles.buttonRowResponsive}>
               {[30, 60, 300].map((sec) => (
                 <TouchableOpacity
                   key={sec}
                   style={styles.presetBtn}
+                  activeOpacity={0.8}
                   onPress={() => setDeadmanSeconds(sec)}
                 >
-                  <Text style={styles.presetBtnText}>{sec >= 60 ? `${sec / 60} min` : `${sec}s`}</Text>
+                  <Text style={styles.presetBtnText}>
+                    {sec >= 60 ? `${sec / 60} min` : `${sec}s`}
+                  </Text>
                 </TouchableOpacity>
               ))}
             </View>
           )}
         </View>
 
-        {/* Volunteer Sentinel Mode Toggle */}
+        {/* Volunteer Sentinel Mesh Toggle */}
         <View style={styles.card}>
-          <View style={styles.rowBetween}>
-            <View>
+          <View style={styles.cardHeaderRow}>
+            <View style={{ flex: 1, paddingRight: 8 }}>
               <Text style={styles.cardTitle}>Community Sentinel Mesh</Text>
-              <Text style={styles.cardDesc}>Receive alerts within 500m</Text>
+              <Text style={styles.cardDesc}>
+                Receive silent alerts when someone within 500m triggers an SOS
+              </Text>
             </View>
             <TouchableOpacity
-              style={[styles.volunteerToggle, isVolunteer && styles.volunteerToggleActive]}
+              style={[
+                styles.volunteerToggle,
+                isVolunteer && styles.volunteerToggleActive,
+              ]}
+              activeOpacity={0.8}
               onPress={() => setIsVolunteer(!isVolunteer)}
             >
-              <Text style={styles.volunteerToggleText}>{isVolunteer ? 'ON' : 'OFF'}</Text>
+              <Text style={styles.volunteerToggleText}>
+                {isVolunteer ? "ON" : "OFF"}
+              </Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -1385,428 +1940,586 @@ export default function App() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0a0d14',
+    backgroundColor: "#0a0d14",
   },
   scrollContent: {
-    padding: 20,
+    paddingHorizontal: 16,
+    paddingTop: 12,
     paddingBottom: 40,
   },
   header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 20,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 16,
   },
   headerTitle: {
-    fontSize: 22,
-    fontWeight: '800',
-    color: '#f8fafc',
-    letterSpacing: 1,
+    fontSize: 20,
+    fontWeight: "900",
+    color: "#f8fafc",
+    letterSpacing: 0.5,
   },
   headerSubtitle: {
-    fontSize: 12,
-    color: '#94a3b8',
-    fontWeight: '600',
+    fontSize: 11,
+    color: "#94a3b8",
+    fontWeight: "600",
     marginTop: 2,
   },
   stealthBtn: {
-    backgroundColor: 'rgba(255, 255, 255, 0.08)',
-    paddingVertical: 6,
+    backgroundColor: "rgba(255, 255, 255, 0.08)",
+    paddingVertical: 7,
     paddingHorizontal: 12,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.1)',
+    borderColor: "rgba(255, 255, 255, 0.12)",
   },
   stealthBtnText: {
-    color: '#f8fafc',
+    color: "#f8fafc",
     fontSize: 12,
-    fontWeight: '600',
+    fontWeight: "700",
+  },
+  logoutBtn: {
+    backgroundColor: "rgba(244, 63, 94, 0.12)",
+    paddingVertical: 7,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "rgba(244, 63, 94, 0.3)",
+  },
+  logoutBtnText: {
+    color: "#fda4af",
+    fontSize: 12,
+    fontWeight: "700",
   },
   sosContainer: {
-    alignItems: 'center',
-    marginVertical: 24,
+    alignItems: "center",
+    marginVertical: 18,
   },
   sosButton: {
-    width: 180,
-    height: 180,
-    borderRadius: 90,
-    backgroundColor: '#ef4444',
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#ef4444',
+    width: 160,
+    height: 160,
+    borderRadius: 80,
+    backgroundColor: "#ef4444",
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#ef4444",
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.5,
     shadowRadius: 20,
     elevation: 10,
     borderWidth: 4,
-    borderColor: 'rgba(255, 255, 255, 0.2)',
+    borderColor: "rgba(255, 255, 255, 0.25)",
   },
   sosButtonActive: {
-    backgroundColor: '#10b981',
-    shadowColor: '#10b981',
+    backgroundColor: "#10b981",
+    shadowColor: "#10b981",
   },
   sosText: {
-    color: '#ffffff',
-    fontSize: 36,
-    fontWeight: '900',
+    color: "#ffffff",
+    fontSize: 34,
+    fontWeight: "900",
     letterSpacing: 2,
   },
   sosSubtext: {
-    color: 'rgba(255, 255, 255, 0.8)',
-    fontSize: 12,
-    fontWeight: '600',
+    color: "rgba(255, 255, 255, 0.85)",
+    fontSize: 11,
+    fontWeight: "600",
     marginTop: 4,
   },
   card: {
-    backgroundColor: 'rgba(24, 34, 52, 0.75)',
+    backgroundColor: "rgba(24, 34, 52, 0.85)",
     borderRadius: 14,
-    padding: 16,
-    marginBottom: 16,
+    padding: 14,
+    marginBottom: 14,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
+    borderColor: "rgba(255, 255, 255, 0.08)",
+  },
+  cardHeaderRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 8,
   },
   cardTitle: {
-    color: '#f8fafc',
+    color: "#f8fafc",
     fontSize: 15,
-    fontWeight: '700',
-    marginBottom: 10,
+    fontWeight: "800",
+    letterSpacing: -0.2,
   },
   cardDesc: {
-    color: '#94a3b8',
-    fontSize: 12,
-    marginBottom: 10,
+    color: "#94a3b8",
+    fontSize: 11,
+    marginTop: 2,
+    lineHeight: 15,
+  },
+  subCard: {
+    marginTop: 8,
+    padding: 10,
+    borderRadius: 10,
+    backgroundColor: "rgba(255, 255, 255, 0.03)",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.08)",
+  },
+  subCardPurple: {
+    backgroundColor: "rgba(168, 85, 247, 0.08)",
+    borderColor: "rgba(168, 85, 247, 0.25)",
+  },
+  subCardRed: {
+    backgroundColor: "rgba(239, 68, 68, 0.08)",
+    borderColor: "rgba(239, 68, 68, 0.22)",
   },
   rowBetween: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 6,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 5,
+  },
+  metaStack: {
+    marginVertical: 3,
   },
   metaLabel: {
-    color: '#94a3b8',
-    fontSize: 13,
+    color: "#94a3b8",
+    fontSize: 12,
+    fontWeight: "500",
   },
   metaValue: {
-    color: '#06b6d4',
-    fontSize: 13,
-    fontWeight: '600',
-    fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
+    color: "#06b6d4",
+    fontSize: 12,
+    fontWeight: "700",
+    fontFamily: Platform.OS === "ios" ? "Courier" : "monospace",
   },
   divider: {
     height: 1,
-    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    backgroundColor: "rgba(255, 255, 255, 0.08)",
     marginVertical: 10,
   },
   modelStatusBadge: {
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    backgroundColor: "rgba(255, 255, 255, 0.1)",
     paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+  },
+  modelStatusBadgeReady: {
+    backgroundColor: "rgba(16, 185, 129, 0.2)",
+    borderWidth: 1,
+    borderColor: "#10b981",
+  },
+  modelStatusBadgeRed: {
+    backgroundColor: "rgba(239, 68, 68, 0.2)",
+    borderWidth: 1,
+    borderColor: "#ef4444",
+  },
+  modelStatusBadgeText: {
+    color: "#34d399",
+    fontSize: 10,
+    fontWeight: "800",
+  },
+  badgeSmall: {
+    backgroundColor: "rgba(168, 85, 247, 0.2)",
+    paddingHorizontal: 6,
     paddingVertical: 3,
     borderRadius: 4,
   },
-  modelStatusBadgeReady: {
-    backgroundColor: 'rgba(16, 185, 129, 0.2)',
-    borderWidth: 1,
-    borderColor: '#10b981',
-  },
-  modelStatusBadgeText: {
-    color: '#34d399',
+  badgeSmallText: {
     fontSize: 10,
-    fontWeight: '800',
+    fontWeight: "800",
+    color: "#d8b4fe",
   },
-  mlStreamBox: {
-    backgroundColor: 'rgba(0, 0, 0, 0.3)',
-    borderRadius: 8,
-    padding: 12,
-    marginTop: 6,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.05)',
+  badgeSmallOrange: {
+    backgroundColor: "rgba(245, 158, 11, 0.2)",
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  badgeSmallOrangeText: {
+    fontSize: 10,
+    color: "#fbbf24",
+    fontWeight: "800",
   },
   meterTrack: {
     height: 6,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    backgroundColor: "rgba(255, 255, 255, 0.1)",
     borderRadius: 3,
-    overflow: 'hidden',
-    marginTop: 6,
-    marginBottom: 10,
+    overflow: "hidden",
+    marginTop: 4,
+    marginBottom: 6,
   },
   meterFill: {
-    height: '100%',
-    backgroundColor: '#06b6d4',
+    height: "100%",
+    backgroundColor: "#06b6d4",
     borderRadius: 3,
   },
   meterFillAlert: {
-    backgroundColor: '#ef4444',
+    backgroundColor: "#ef4444",
   },
-  mlToggleBtn: {
-    backgroundColor: 'rgba(59, 130, 246, 0.2)',
-    borderWidth: 1,
-    borderColor: '#3b82f6',
-    borderRadius: 8,
-    paddingVertical: 8,
-    alignItems: 'center',
-    marginTop: 6,
-  },
-  mlToggleBtnActive: {
-    backgroundColor: 'rgba(239, 68, 68, 0.2)',
-    borderColor: '#ef4444',
-  },
-  mlToggleBtnText: {
-    color: '#f8fafc',
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  batteryPresetRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
+  buttonRowResponsive: {
+    flexDirection: "row",
     gap: 8,
+    marginTop: 8,
+  },
+  buttonWrapRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 6,
     marginTop: 4,
   },
+  actionBtn: {
+    backgroundColor: "rgba(255, 255, 255, 0.06)",
+    paddingVertical: 9,
+    paddingHorizontal: 10,
+    borderRadius: 8,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.1)",
+    minHeight: 38,
+  },
+  actionBtnText: {
+    color: "#f8fafc",
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  actionBtnPurple: {
+    backgroundColor: "rgba(168, 85, 247, 0.2)",
+    borderColor: "#c084fc",
+  },
+  actionBtnBlue: {
+    backgroundColor: "rgba(59, 130, 246, 0.2)",
+    borderColor: "#3b82f6",
+  },
+  actionBtnRed: {
+    backgroundColor: "rgba(239, 68, 68, 0.2)",
+    borderColor: "#ef4444",
+  },
+  mlPill: {
+    flex: 1,
+    paddingVertical: 9,
+    borderRadius: 8,
+    backgroundColor: "rgba(255, 255, 255, 0.04)",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.1)",
+    alignItems: "center",
+    justifyContent: "center",
+    minHeight: 38,
+  },
+  mlPillActive: {
+    backgroundColor: "rgba(168, 85, 247, 0.25)",
+    borderColor: "#a855f7",
+  },
+  mlPillText: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#94a3b8",
+  },
+  mlPillTextActive: {
+    color: "#d8b4fe",
+  },
+  simPill: {
+    paddingVertical: 7,
+    paddingHorizontal: 10,
+    borderRadius: 8,
+    borderWidth: 1,
+    alignItems: "center",
+  },
+  simPillRed: {
+    backgroundColor: "rgba(239, 68, 68, 0.15)",
+    borderColor: "#ef4444",
+  },
+  simPillPurple: {
+    backgroundColor: "rgba(168, 85, 247, 0.15)",
+    borderColor: "#a855f7",
+  },
+  simPillGray: {
+    backgroundColor: "rgba(100, 116, 139, 0.2)",
+    borderColor: "#64748b",
+  },
+  simPillText: {
+    fontSize: 11,
+    fontWeight: "700",
+  },
   battBtn: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    backgroundColor: "rgba(255, 255, 255, 0.08)",
     borderRadius: 6,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.1)",
   },
   battBtnText: {
-    color: '#f8fafc',
+    color: "#f8fafc",
     fontSize: 11,
-    fontWeight: '600',
+    fontWeight: "700",
   },
   battBtnCritical: {
-    backgroundColor: 'rgba(239, 68, 68, 0.25)',
-    borderWidth: 1,
-    borderColor: '#ef4444',
+    backgroundColor: "rgba(239, 68, 68, 0.25)",
+    borderColor: "#ef4444",
   },
   battBtnCriticalText: {
-    color: '#f87171',
+    color: "#f87171",
     fontSize: 11,
-    fontWeight: '700',
+    fontWeight: "800",
   },
   shutdownSimBtn: {
-    backgroundColor: 'rgba(239, 68, 68, 0.2)',
+    backgroundColor: "rgba(239, 68, 68, 0.18)",
     borderWidth: 1,
-    borderColor: '#ef4444',
+    borderColor: "#ef4444",
     paddingVertical: 10,
+    paddingHorizontal: 12,
     borderRadius: 8,
-    alignItems: 'center',
-    marginTop: 6,
+    alignItems: "center",
   },
   shutdownSimBtnText: {
-    color: '#fca5a5',
+    color: "#fca5a5",
     fontSize: 12,
-    fontWeight: '700',
+    fontWeight: "700",
+    textAlign: "center",
   },
-  simNetBtn: {
-    flex: 1,
-    backgroundColor: 'rgba(255, 255, 255, 0.06)',
-    paddingVertical: 8,
+  mlToggleBtn: {
+    backgroundColor: "rgba(59, 130, 246, 0.2)",
+    borderWidth: 1,
+    borderColor: "#3b82f6",
     borderRadius: 8,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.1)',
+    paddingVertical: 10,
+    alignItems: "center",
+    marginTop: 8,
   },
-  simNetBtnActive: {
-    backgroundColor: 'rgba(239, 68, 68, 0.2)',
-    borderColor: '#ef4444',
+  mlToggleBtnActive: {
+    backgroundColor: "rgba(239, 68, 68, 0.2)",
+    borderColor: "#ef4444",
   },
-  simNetBtnText: {
-    color: '#f8fafc',
-    fontSize: 12,
-    fontWeight: '600',
+  mlToggleBtnText: {
+    color: "#f8fafc",
+    fontSize: 13,
+    fontWeight: "700",
   },
-  smsActionBtn: {
-    flex: 1,
-    backgroundColor: 'rgba(59, 130, 246, 0.2)',
-    paddingVertical: 8,
+  gpsToggleBtn: {
+    marginTop: 8,
+    paddingVertical: 9,
+    paddingHorizontal: 12,
     borderRadius: 8,
-    alignItems: 'center',
+    backgroundColor: "rgba(255, 255, 255, 0.05)",
     borderWidth: 1,
-    borderColor: '#3b82f6',
+    borderColor: "rgba(255, 255, 255, 0.1)",
+    alignItems: "center",
   },
-  smsActionBtnText: {
-    color: '#60a5fa',
+  gpsToggleBtnText: {
     fontSize: 12,
-    fontWeight: '700',
-  },
-  triggerGrid: {
-    flexDirection: 'row',
-    gap: 10,
-  },
-  triggerBtn: {
-    flex: 1,
-    backgroundColor: 'rgba(255, 255, 255, 0.04)',
-    padding: 12,
-    borderRadius: 10,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.06)',
-  },
-  triggerBtnEmoji: {
-    fontSize: 24,
-    marginBottom: 4,
-  },
-  triggerBtnText: {
-    color: '#f8fafc',
-    fontSize: 11,
-    fontWeight: '600',
-    textAlign: 'center',
-  },
-  timerPresetRow: {
-    flexDirection: 'row',
-    gap: 10,
+    color: "#94a3b8",
+    fontWeight: "600",
   },
   presetBtn: {
     flex: 1,
-    backgroundColor: 'rgba(99, 102, 241, 0.2)',
+    backgroundColor: "rgba(99, 102, 241, 0.2)",
     borderWidth: 1,
-    borderColor: '#6366f1',
-    paddingVertical: 8,
+    borderColor: "#6366f1",
+    paddingVertical: 9,
     borderRadius: 8,
-    alignItems: 'center',
+    alignItems: "center",
   },
   presetBtnText: {
-    color: '#818cf8',
-    fontWeight: '700',
+    color: "#818cf8",
+    fontWeight: "700",
     fontSize: 12,
   },
   timerActiveRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    backgroundColor: 'rgba(239, 68, 68, 0.2)',
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    backgroundColor: "rgba(239, 68, 68, 0.2)",
     padding: 10,
     borderRadius: 8,
+    marginTop: 8,
   },
   timerCountdown: {
-    color: '#f87171',
-    fontWeight: '700',
-    fontSize: 14,
+    color: "#f87171",
+    fontWeight: "800",
+    fontSize: 13,
   },
   timerCancelBtn: {
-    backgroundColor: '#ef4444',
+    backgroundColor: "#ef4444",
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 6,
   },
   timerCancelText: {
-    color: '#fff',
+    color: "#fff",
     fontSize: 12,
-    fontWeight: '700',
+    fontWeight: "800",
   },
   volunteerToggle: {
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    backgroundColor: "rgba(255, 255, 255, 0.1)",
     paddingHorizontal: 16,
     paddingVertical: 8,
     borderRadius: 20,
   },
   volunteerToggleActive: {
-    backgroundColor: '#10b981',
+    backgroundColor: "#10b981",
   },
   volunteerToggleText: {
-    color: '#fff',
-    fontWeight: '700',
+    color: "#fff",
+    fontWeight: "800",
     fontSize: 12,
   },
+  telemetryMiniBox: {
+    marginTop: 6,
+    padding: 6,
+    borderRadius: 6,
+    backgroundColor: "rgba(0, 0, 0, 0.3)",
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  noticeMiniBox: {
+    marginTop: 6,
+    padding: 6,
+    borderRadius: 6,
+    backgroundColor: "rgba(16, 185, 129, 0.15)",
+    borderWidth: 1,
+    borderColor: "#10b981",
+  },
+  noticeMiniText: {
+    fontSize: 11,
+    color: "#6ee7b7",
+    fontWeight: "600",
+  },
+  transcriptBox: {
+    marginTop: 6,
+    padding: 8,
+    borderRadius: 6,
+    backgroundColor: "rgba(0, 0, 0, 0.4)",
+  },
+  transcriptText: {
+    fontSize: 12,
+    color: "#f8fafc",
+    fontStyle: "italic",
+  },
+  intentRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginTop: 4,
+  },
+  intentTag: {
+    fontSize: 10,
+    fontWeight: "800",
+    color: "#ef4444",
+  },
+  intentLatency: {
+    fontSize: 10,
+    color: "#94a3b8",
+  },
+  vaultRefBox: {
+    marginTop: 6,
+    padding: 8,
+    borderRadius: 6,
+    backgroundColor: "rgba(56, 189, 248, 0.1)",
+    borderWidth: 1,
+    borderColor: "rgba(56, 189, 248, 0.2)",
+  },
+  vaultRefText: {
+    fontSize: 11,
+    color: "#38bdf8",
+    fontWeight: "600",
+  },
   lastGaspBanner: {
-    backgroundColor: 'rgba(239, 68, 68, 0.3)',
-    borderWidth: 2,
-    borderColor: '#ef4444',
+    backgroundColor: "rgba(239, 68, 68, 0.3)",
+    borderWidth: 1.5,
+    borderColor: "#ef4444",
     borderRadius: 10,
-    padding: 12,
-    marginBottom: 16,
+    padding: 10,
+    marginBottom: 12,
   },
   lastGaspTitle: {
-    color: '#fca5a5',
-    fontWeight: '900',
-    fontSize: 13,
+    color: "#fca5a5",
+    fontWeight: "900",
+    fontSize: 12,
   },
   lastGaspSub: {
-    color: '#fff',
+    color: "#fff",
     fontSize: 11,
     marginTop: 2,
   },
   shutdownNoticeBanner: {
-    backgroundColor: 'rgba(16, 185, 129, 0.2)',
+    backgroundColor: "rgba(16, 185, 129, 0.2)",
     borderWidth: 1,
-    borderColor: '#10b981',
+    borderColor: "#10b981",
     borderRadius: 10,
-    padding: 12,
-    marginBottom: 16,
+    padding: 10,
+    marginBottom: 12,
   },
   shutdownNoticeBannerTitle: {
-    color: '#34d399',
-    fontWeight: '800',
-    fontSize: 13,
+    color: "#34d399",
+    fontWeight: "800",
+    fontSize: 12,
   },
   shutdownNoticeBannerSub: {
-    color: '#cbd5e1',
+    color: "#cbd5e1",
     fontSize: 11,
     marginTop: 2,
   },
   dynamicConfigBanner: {
-    backgroundColor: 'rgba(99, 102, 241, 0.2)',
+    backgroundColor: "rgba(99, 102, 241, 0.2)",
     borderWidth: 1,
-    borderColor: '#818cf8',
+    borderColor: "#818cf8",
     borderRadius: 10,
-    padding: 12,
-    marginBottom: 16,
+    padding: 10,
+    marginBottom: 12,
   },
   dynamicConfigBannerTitle: {
-    color: '#a5b4fc',
-    fontWeight: '800',
-    fontSize: 13,
+    color: "#a5b4fc",
+    fontWeight: "800",
+    fontSize: 12,
   },
   dynamicConfigBannerSub: {
-    color: '#e0e7ff',
+    color: "#e0e7ff",
     fontSize: 11,
     marginTop: 2,
   },
   responderBanner: {
-    backgroundColor: 'rgba(249, 115, 22, 0.2)',
+    backgroundColor: "rgba(249, 115, 22, 0.2)",
     borderWidth: 1,
-    borderColor: '#f97316',
+    borderColor: "#f97316",
     borderRadius: 10,
-    padding: 12,
-    marginBottom: 16,
+    padding: 10,
+    marginBottom: 12,
   },
   responderBannerTitle: {
-    color: '#fb923c',
-    fontWeight: '800',
-    fontSize: 13,
+    color: "#fb923c",
+    fontWeight: "800",
+    fontSize: 12,
   },
   responderBannerSub: {
-    color: '#cbd5e1',
+    color: "#cbd5e1",
     fontSize: 11,
     marginTop: 2,
   },
   nearbyBanner: {
-    backgroundColor: 'rgba(239, 68, 68, 0.2)',
+    backgroundColor: "rgba(239, 68, 68, 0.2)",
     borderWidth: 1,
-    borderColor: '#ef4444',
+    borderColor: "#ef4444",
     borderRadius: 10,
-    padding: 12,
-    marginBottom: 16,
+    padding: 10,
+    marginBottom: 12,
   },
   nearbyBannerTitle: {
-    color: '#f87171',
-    fontWeight: '800',
-    fontSize: 13,
+    color: "#f87171",
+    fontWeight: "800",
+    fontSize: 12,
   },
   nearbyBannerSub: {
-    color: '#cbd5e1',
+    color: "#cbd5e1",
     fontSize: 11,
     marginTop: 2,
   },
-  // Powered off screen
   poweredOffContainer: {
     flex: 1,
-    backgroundColor: '#000',
-    justifyContent: 'center',
-    alignItems: 'center',
+    backgroundColor: "#000",
+    justifyContent: "center",
+    alignItems: "center",
     padding: 24,
   },
   poweredOffContent: {
-    alignItems: 'center',
+    alignItems: "center",
     maxWidth: 400,
   },
   poweredOffEmoji: {
@@ -1814,134 +2527,120 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   poweredOffTitle: {
-    color: '#ef4444',
-    fontSize: 22,
-    fontWeight: '900',
+    color: "#ef4444",
+    fontSize: 20,
+    fontWeight: "900",
     letterSpacing: 1.5,
     marginBottom: 8,
   },
   poweredOffSub: {
-    color: '#94a3b8',
+    color: "#94a3b8",
     fontSize: 13,
-    textAlign: 'center',
+    textAlign: "center",
     marginBottom: 20,
   },
   shutdownNoticeBox: {
-    backgroundColor: 'rgba(16, 185, 129, 0.15)',
+    backgroundColor: "rgba(16, 185, 129, 0.15)",
     borderWidth: 1,
-    borderColor: '#10b981',
+    borderColor: "#10b981",
     borderRadius: 10,
-    padding: 14,
-    marginBottom: 24,
-    width: '100%',
+    padding: 12,
+    marginBottom: 20,
+    width: "100%",
   },
   shutdownNoticeTitle: {
-    color: '#34d399',
-    fontWeight: '800',
+    color: "#34d399",
+    fontWeight: "800",
     fontSize: 12,
     marginBottom: 4,
   },
   shutdownNoticeText: {
-    color: '#f8fafc',
+    color: "#f8fafc",
     fontSize: 12,
   },
   powerOnBtn: {
-    backgroundColor: '#3b82f6',
+    backgroundColor: "#3b82f6",
     paddingVertical: 12,
     paddingHorizontal: 24,
     borderRadius: 10,
   },
   powerOnBtnText: {
-    color: '#fff',
+    color: "#fff",
     fontSize: 14,
-    fontWeight: '700',
+    fontWeight: "700",
   },
-  // Calculator Decoy
   calcContainer: {
     flex: 1,
-    backgroundColor: '#000',
-    padding: 20,
-    justifyContent: 'flex-end',
+    backgroundColor: "#000",
+    padding: 16,
+    justifyContent: "flex-end",
   },
   calcDisplay: {
-    padding: 20,
-    alignItems: 'flex-end',
-    marginBottom: 20,
+    padding: 16,
+    alignItems: "flex-end",
+    marginBottom: 16,
   },
   calcDisplayText: {
-    color: '#fff',
-    fontSize: 48,
-    fontWeight: '300',
+    color: "#fff",
+    fontSize: 44,
+    fontWeight: "300",
   },
   calcGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 12,
-    justifyContent: 'center',
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 10,
+    justifyContent: "center",
   },
   calcBtn: {
-    width: '21%',
+    width: "21%",
     aspectRatio: 1,
     borderRadius: 40,
-    backgroundColor: '#333',
-    alignItems: 'center',
-    justifyContent: 'center',
+    backgroundColor: "#333",
+    alignItems: "center",
+    justifyContent: "center",
   },
   calcBtnEqual: {
-    backgroundColor: '#ff9f0a',
+    backgroundColor: "#ff9f0a",
   },
   calcBtnText: {
-    color: '#fff',
+    color: "#fff",
     fontSize: 22,
-    fontWeight: '600',
+    fontWeight: "600",
   },
   calcHint: {
-    color: '#555',
+    color: "#555",
     fontSize: 11,
-    textAlign: 'center',
-    marginTop: 20,
-  },
-  logoutBtn: {
-    backgroundColor: 'rgba(255, 255, 255, 0.08)',
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.12)',
-  },
-  logoutBtnText: {
-    color: '#94a3b8',
-    fontSize: 12,
-    fontWeight: '700',
+    textAlign: "center",
+    marginTop: 18,
   },
   citizenProfileCard: {
-    backgroundColor: 'rgba(30, 41, 59, 0.5)',
+    backgroundColor: "rgba(30, 41, 59, 0.5)",
     borderRadius: 12,
     padding: 12,
-    marginBottom: 16,
+    marginBottom: 14,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
+    borderColor: "rgba(255, 255, 255, 0.08)",
   },
   citizenAvatar: {
     width: 34,
     height: 34,
     borderRadius: 10,
-    backgroundColor: '#ef4444',
-    alignItems: 'center',
-    justifyContent: 'center',
+    backgroundColor: "#ef4444",
+    alignItems: "center",
+    justifyContent: "center",
   },
   citizenAvatarText: {
-    color: '#ffffff',
+    color: "#ffffff",
     fontSize: 16,
-    fontWeight: '800',
+    fontWeight: "800",
   },
   citizenName: {
-    color: '#f8fafc',
+    color: "#f8fafc",
     fontSize: 14,
-    fontWeight: '700',
+    fontWeight: "700",
   },
   citizenPhone: {
-    color: '#94a3b8',
+    color: "#94a3b8",
     fontSize: 11,
     marginTop: 1,
   },
@@ -1949,32 +2648,11 @@ const styles = StyleSheet.create({
     marginTop: 8,
     paddingTop: 8,
     borderTopWidth: 1,
-    borderTopColor: 'rgba(255, 255, 255, 0.06)',
+    borderTopColor: "rgba(255, 255, 255, 0.06)",
   },
   emergencyContactPillText: {
-    color: '#38bdf8',
+    color: "#38bdf8",
     fontSize: 11,
-    fontWeight: '600',
-  },
-  mlPill: {
-    flex: 1,
-    paddingVertical: 8,
-    borderRadius: 8,
-    backgroundColor: 'rgba(255, 255, 255, 0.04)',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.1)',
-    alignItems: 'center',
-  },
-  mlPillActive: {
-    backgroundColor: 'rgba(168, 85, 247, 0.2)',
-    borderColor: '#a855f7',
-  },
-  mlPillText: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#94a3b8',
-  },
-  mlPillTextActive: {
-    color: '#d8b4fe',
+    fontWeight: "600",
   },
 });

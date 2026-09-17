@@ -5,14 +5,14 @@
   "scripts": {
     "start": "expo start",
     "android": "expo start --android",
-    "ios": "expo start --ios",
+    "ios": "expo run:ios",
     "web": "expo start --web",
     "download:models": "curl -L -o ./assets/models/ggml-tiny.en.bin https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en.bin && curl -L -o ./assets/models/yamnet.tflite https://storage.googleapis.com/tfhub-modules/google/lite-model/yamnet/tflite/1.tflite"
   },
   "dependencies": {
     "@expo/metro-runtime": "~57.0.15",
     "expo": "~57.0.21",
-    "expo-av": "^16.0.8",
+    "expo-audio": "^57.0.5",
     "expo-battery": "^57.0.3",
     "expo-location": "^57.0.17",
     "expo-sensors": "^57.0.3",

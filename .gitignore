@@ -4,3 +4,5 @@ node_modules/*
 bun.lock
 .expo
 dist
+android/*
+android

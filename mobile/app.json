@@ -15,7 +15,8 @@
     "android": {
       "adaptiveIcon": {
         "backgroundColor": "#0a0d14"
-      }
+      },
+      "package": "com.anonymous.guardianmobile"
     }
   }
 }
