@@ -1,0 +1,112 @@
+# ========================
+# Dependencies & Package Managers
+# ========================
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.pnp/
+.pnp.js
+
+# ========================
+# Environment & Secrets
+# ========================
+.env
+.env.*
+!.env.example
+*.pem
+*.jks
+*.keystore
+
+# ========================
+# Metro Bundler & Caches
+# ========================
+.metro-health-check*
+.expo/
+.expo-shared/
+*.tsbuildinfo
+
+# ========================
+# iOS / Xcode
+# ========================
+ios/Pods/
+ios/build/
+ios/DerivedData/
+*.pbxuser
+!default.pbxuser
+*.mode1v3
+!default.mode1v3
+*.mode2v3
+!default.mode2v3
+*.perspectivev3
+!default.perspectivev3
+xcuserdata/
+*.xccheckout
+*.moved-builder
+DerivedData/
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# Fastlane (iOS)
+ios/fastlane/report.xml
+ios/fastlane/Preview.html
+ios/fastlane/screenshots
+ios/fastlane/test_output
+
+# ========================
+# Android / Gradle
+# ========================
+android/.gradle/
+android/build/
+android/app/build/
+android/app/lint/
+android/captures/
+android/.cxx/
+android/app/release/
+android/.gradle/
+modules/guardian-audio/android/build/
+modules/guardian-audio/android/app/build/
+modules/guardian-audio/android/app/lint/
+modules/guardian-audio/android/captures/
+modules/guardian-audio/android/.cxx/
+modules/guardian-audio/android/app/release/
+*.apk
+*.aab
+
+# Android Studio / IntelliJ
+android/.idea/
+android/*.iml
+android/app/*.iml
+local.properties
+
+# Fastlane (Android)
+android/fastlane/report.xml
+android/fastlane/Preview.html
+android/fastlane/screenshots
+android/fastlane/test_output
+
+# ========================
+# Editor & OS Artifacts
+# ========================
+.DS_Store
+.AppleDouble
+.LSOverride
+Thumbs.db
+ehthumbs.db
+
+# VS Code
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+
+# IntelliJ / WebStorm
+.idea/
+
+# Testing & Coverage
+coverage/
+.nyc_output/
