@@ -1,0 +1,18 @@
+{
+  "name": "guardian-audio",
+  "version": "1.0.0",
+  "description": "Guardian Edge Local Expo Module for low-latency background AudioRecord and hardware arbitration",
+  "main": "index.ts",
+  "types": "index.ts",
+  "scripts": {},
+  "keywords": [
+    "expo",
+    "expo-module",
+    "guardian-audio"
+  ],
+  "author": "Guardian Edge Team",
+  "license": "MIT",
+  "peerDependencies": {
+    "expo": "*"
+  }
+}

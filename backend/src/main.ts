@@ -1,15 +1,19 @@
-import { NestFactory } from '@nestjs/core';
-import { FastifyAdapter, NestFastifyApplication } from '@nestjs/platform-fastify';
-import { ValidationPipe, Logger } from '@nestjs/common';
-import { AppModule } from './app.module';
-import fastifyMultipart from '@fastify/multipart';
-import fastifyStatic from '@fastify/static';
-import * as path from 'path';
-import * as fs from 'fs';
+import { NestFactory } from "@nestjs/core";
+import {
+  FastifyAdapter,
+  NestFastifyApplication,
+} from "@nestjs/platform-fastify";
+import { ValidationPipe, Logger } from "@nestjs/common";
+import { AppModule } from "./app.module";
+import { HttpLoggingInterceptor } from "./common/interceptors/http-logging.interceptor";
+import fastifyMultipart from "@fastify/multipart";
+import fastifyStatic from "@fastify/static";
+import * as path from "path";
+import * as fs from "fs";
 
 async function bootstrap() {
-  const logger = new Logger('Bootstrap');
-  
+  const logger = new Logger("Bootstrap");
+
   const fastifyAdapter = new FastifyAdapter({
     logger: false,
   });
@@ -20,7 +24,7 @@ async function bootstrap() {
   );
 
   // Ensure uploads/evidence directory exists
-  const uploadsDir = path.join(process.cwd(), 'uploads', 'evidence');
+  const uploadsDir = path.join(process.cwd(), "uploads", "evidence");
   if (!fs.existsSync(uploadsDir)) {
     fs.mkdirSync(uploadsDir, { recursive: true });
   }
@@ -34,14 +38,14 @@ async function bootstrap() {
 
   // Register static file serving for uploaded evidence
   await app.register(fastifyStatic as any, {
-    root: path.join(process.cwd(), 'uploads'),
-    prefix: '/uploads/',
+    root: path.join(process.cwd(), "uploads"),
+    prefix: "/uploads/",
     decorateReply: false,
   });
 
   // Enable CORS
   app.enableCors({
-    origin: '*',
+    origin: "*",
     credentials: true,
   });
 
@@ -54,15 +58,21 @@ async function bootstrap() {
     }),
   );
 
-  const port = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
-  await app.listen(port, '0.0.0.0');
+  // Enable global HTTP request/response logging
+  app.useGlobalInterceptors(new HttpLoggingInterceptor());
 
-  logger.log(`Project Guardian Fastify NestJS Backend is running on: http://localhost:${port}`);
-  logger.log(`GraphQL Apollo/Mercurius Playground available at: http://localhost:${port}/graphql`);
+  const port = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
+  await app.listen(port, "0.0.0.0");
+
+  logger.log(
+    `Project Guardian Fastify NestJS Backend is running on: http://localhost:${port}`,
+  );
+  logger.log(
+    `GraphQL Apollo/Mercurius Playground available at: http://localhost:${port}/graphql`,
+  );
   logger.log(`WebSocket Real-Time Gateway initialized on port: ${port}`);
 }
 
 bootstrap().catch((err) => {
-  console.error('Fatal error starting Guardian NestJS Backend:', err);
+  console.error("Fatal error starting Guardian NestJS Backend:", err);
 });
-

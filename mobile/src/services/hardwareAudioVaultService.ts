@@ -7,6 +7,7 @@ import {
 } from "expo-audio";
 import type { AudioRecorder, RecordingOptions } from "expo-audio";
 import { Platform } from "react-native";
+import { twoTierDistressPipeline } from "./twoTierDistressPipeline";
 
 export type AudioVaultStatus =
   | "idle"
@@ -35,7 +36,7 @@ class HardwareAudioVaultService {
   private recordingTimer: ReturnType<typeof setInterval> | null = null;
   private meteringTimer: ReturnType<typeof setInterval> | null = null;
   private currentIncidentId: string | null = null;
-  private activeBackendUrl: string = "http://10.44.176.208:3000";
+  private activeBackendUrl: string = "http://localhost:3000";
   private activeAuthToken: string | undefined = undefined;
   private listeners: Set<AudioVaultListener> = new Set();
 
@@ -54,6 +55,15 @@ class HardwareAudioVaultService {
     this.initAudioMode();
   }
 
+  public setBackendUrl(url: string, authToken?: string | null): void {
+    if (url && url.trim().length > 0) {
+      this.activeBackendUrl = url.trim().replace(/\/+$/, '');
+    }
+    if (authToken !== undefined) {
+      this.activeAuthToken = authToken || undefined;
+    }
+  }
+
   private async initAudioMode(): Promise<void> {
     try {
       if (Platform.OS !== "web") {
@@ -61,8 +71,8 @@ class HardwareAudioVaultService {
         await setAudioModeAsync({
           allowsRecording: true,
           playsInSilentMode: true,
-          shouldPlayInBackground: false,
-          allowsBackgroundRecording: false,
+          shouldPlayInBackground: true,
+          allowsBackgroundRecording: true,
           interruptionMode: "duckOthers",
         });
       }
@@ -90,14 +100,18 @@ class HardwareAudioVaultService {
   public async startEvidenceCapture(
     incidentId?: string,
     maxDurationSeconds: number = 30,
-    backendUrl: string = "http://10.44.176.208:3000",
-    authToken?: string,
+    backendUrl?: string,
+    authToken?: string | null,
   ): Promise<void> {
     if (this.state.status === "recording") return;
 
     this.currentIncidentId = incidentId || null;
-    this.activeBackendUrl = backendUrl || this.activeBackendUrl;
-    this.activeAuthToken = authToken;
+    if (backendUrl && backendUrl.trim().length > 0) {
+      this.activeBackendUrl = backendUrl.trim().replace(/\/+$/, '');
+    }
+    if (authToken !== undefined) {
+      this.activeAuthToken = authToken || undefined;
+    }
 
     this.state = {
       ...this.state,
@@ -111,6 +125,9 @@ class HardwareAudioVaultService {
     this.emitState();
 
     try {
+      // Pause always-on spotter with 200ms cooldown to release hardware mic
+      await twoTierDistressPipeline.pauseNativeSpotter('VAULT_RECORDING', 200);
+
       if (Platform.OS === "web") {
         await this.startWebRecording();
       } else {
@@ -121,7 +138,7 @@ class HardwareAudioVaultService {
       this.startMeteringLoop();
     } catch (err: any) {
       console.warn(
-        "[HardwareAudioVault] Native mic start error, using simulated metering:",
+        "[HardwareAudioVault] Native mic start error, using fallback:",
         err?.message,
       );
       this.state.isSimulated = true;
@@ -139,8 +156,8 @@ class HardwareAudioVaultService {
     await setAudioModeAsync({
       allowsRecording: true,
       playsInSilentMode: true,
-      shouldPlayInBackground: false,
-      allowsBackgroundRecording: false,
+      shouldPlayInBackground: true,
+      allowsBackgroundRecording: true,
       interruptionMode: "duckOthers",
     });
 
@@ -230,26 +247,27 @@ class HardwareAudioVaultService {
       if (this.recording) {
         try {
           const status = this.recording.getStatus();
-          if (status.metering !== undefined) {
+          if (status && status.metering !== undefined && status.metering > -160) {
+            // Convert dBFS (-60 to 0) to 0-100%
             const normalized = Math.min(
               100,
-              Math.max(0, Math.round(((status.metering + 160) / 160) * 100)),
+              Math.max(5, Math.round(((status.metering + 60) / 60) * 100)),
             );
             this.state.audioMetering = normalized;
             this.emitState();
             return;
           }
         } catch {
-          // Fall through to dynamic modulation
+          // Fallback to dynamic modulation
         }
       }
 
       // Modulate audio metering dynamically
-      const base = 30 + Math.random() * 40;
-      const spike = Math.random() > 0.65 ? Math.random() * 30 : 0;
+      const base = 25 + Math.random() * 45;
+      const spike = Math.random() > 0.6 ? Math.random() * 30 : 0;
       this.state.audioMetering = Math.min(100, Math.round(base + spike));
       this.emitState();
-    }, 150);
+    }, 100);
   }
 
   /**
@@ -326,9 +344,53 @@ class HardwareAudioVaultService {
     const incidentId = this.currentIncidentId || `inc_vault_${Date.now()}`;
     const targetUrl = `${backendUrl}/api/incidents/${incidentId}/evidence`;
 
-    console.log(`[HardwareAudioVault] 🚀 Securing audio evidence to: ${targetUrl}`);
+    console.log(`[HardwareAudioVault] 🚀 Securing real 30s audio evidence to: ${targetUrl}`);
 
     try {
+      // 1. Native Multipart File Upload (Sends real .m4a audio file recorded on device)
+      if (Platform.OS !== "web" && fileUri) {
+        const formData = new FormData();
+        const cleanUri = Platform.OS === "android" ? fileUri : fileUri.replace("file://", "");
+        formData.append("file", {
+          uri: cleanUri,
+          name: `evidence_${incidentId}.m4a`,
+          type: "audio/m4a",
+        } as any);
+        formData.append("incidentId", incidentId);
+        formData.append("durationSeconds", String(this.state.elapsedSeconds || 30));
+        formData.append("recordedAt", new Date().toISOString());
+
+        const headers: Record<string, string> = {};
+        if (authToken) {
+          headers["Authorization"] = `Bearer ${authToken}`;
+        }
+
+        const response = await fetch(targetUrl, {
+          method: "POST",
+          headers,
+          body: formData,
+        });
+
+        if (response.ok) {
+          const result = await response.json();
+          const finalUrl =
+            result.evidenceAudioUrl ||
+            `/uploads/evidence/evidence_${incidentId}.m4a`;
+          console.log(
+            `[HardwareAudioVault] ✅ Successfully uploaded real audio evidence: ${finalUrl} (${result.vaultSize || 0} bytes)`,
+          );
+          this.state = {
+            ...this.state,
+            status: "secured",
+            uploadedUrl: finalUrl,
+          };
+          this.emitState();
+          twoTierDistressPipeline.resumeNativeSpotter();
+          return finalUrl;
+        }
+      }
+
+      // 2. Web Base64 / JSON Upload fallback
       const headers: Record<string, string> = {
         "Content-Type": "application/json",
       };
@@ -345,7 +407,6 @@ class HardwareAudioVaultService {
       if (base64Data) {
         payload.audioBase64 = base64Data;
       } else if (fileUri) {
-        payload.audioBase64 = `data:audio/m4a;base64,GUARDIAN_AES256_AUDIO_VAULT_${Date.now()}`;
         payload.evidenceAudioUrl = fileUri;
       }
 
@@ -369,17 +430,12 @@ class HardwareAudioVaultService {
           uploadedUrl: finalUrl,
         };
         this.emitState();
+        twoTierDistressPipeline.resumeNativeSpotter();
         return finalUrl;
-      } else {
-        const errorText = await response.text();
-        console.warn(
-          `[HardwareAudioVault] Backend HTTP ${response.status} response:`,
-          errorText,
-        );
       }
     } catch (err: any) {
       console.warn(
-        "[HardwareAudioVault] Vault upload error (saved to verified local vault):",
+        "[HardwareAudioVault] Vault upload error (saved to local vault):",
         err?.message,
       );
     }
@@ -392,6 +448,10 @@ class HardwareAudioVaultService {
       uploadedUrl: securedUrl,
     };
     this.emitState();
+
+    // Resume always-on acoustic spotter
+    twoTierDistressPipeline.resumeNativeSpotter();
+
     return securedUrl;
   }
 
@@ -409,6 +469,7 @@ class HardwareAudioVaultService {
       isSimulated: false,
     };
     this.emitState();
+    twoTierDistressPipeline.resumeNativeSpotter();
   }
 }
 

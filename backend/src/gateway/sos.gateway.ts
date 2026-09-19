@@ -8,7 +8,7 @@ import {
   ConnectedSocket,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
-import { Logger } from '@nestjs/common';
+import { Logger, Inject, forwardRef } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { IncidentsService } from '../incidents/incidents.service';
 import { RedisService } from '../redis/redis.service';
@@ -36,6 +36,7 @@ export class SosGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   constructor(
     private jwtService: JwtService,
+    @Inject(forwardRef(() => IncidentsService))
     private incidentsService: IncidentsService,
     private redisService: RedisService,
   ) {}
@@ -240,21 +241,41 @@ export class SosGateway implements OnGatewayConnection, OnGatewayDisconnect {
         responderId,
       );
 
-      const broadcastData = {
-        incidentId: data.incidentId,
-        responderId,
-        status: data.status,
-        estimatedArrivalMins: data.estimatedArrivalMins || 5,
-        updatedAt: new Date().toISOString(),
-      };
-
-      this.server.to(`room:inc_${data.incidentId}`).emit('events.responder.status_change', broadcastData);
-      this.server.to('room:responders').emit('responder:status_changed', broadcastData);
-      this.server.emit('incident:updated', updated);
+      this.broadcastStatusChange(data.incidentId, data.status, responderId, updated, data.estimatedArrivalMins);
 
       return { success: true, incident: updated };
     } catch (err: any) {
       this.logger.error(`Error in responder:status_change: ${err.message}`);
+    }
+  }
+
+  public broadcastStatusChange(
+    incidentId: string,
+    status: IncidentStatus,
+    resolvedByUserId?: string,
+    updatedIncident?: any,
+    estimatedArrivalMins: number = 5,
+  ) {
+    const broadcastData = {
+      incidentId,
+      status,
+      responderId: resolvedByUserId,
+      resolvedByUserId,
+      estimatedArrivalMins,
+      updatedAt: new Date().toISOString(),
+    };
+
+    if (this.server) {
+      this.server.to(`room:inc_${incidentId}`).emit('events.responder.status_change', broadcastData);
+      this.server.to(`room:inc_${incidentId}`).emit('incident:status_changed', broadcastData);
+      this.server.to('room:responders').emit('responder:status_changed', broadcastData);
+      this.server.to('room:responders').emit('incident:status_changed', broadcastData);
+      this.server.emit('incident:status_changed', broadcastData);
+      this.server.emit('responder:status_changed', broadcastData);
+      if (updatedIncident) {
+        this.server.emit('incident:updated', updatedIncident);
+      }
+      this.logger.log(`Broadcasted status change for incident #${incidentId} -> ${status}`);
     }
   }
 

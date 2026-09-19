@@ -1,0 +1,9 @@
+{
+  "name": "guardian-audio",
+  "platforms": ["android", "ios", "web"],
+  "android": {
+    "modules": [
+      "expo.modules.guardianaudio.GuardianAudioModule"
+    ]
+  }
+}

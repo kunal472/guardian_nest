@@ -29,6 +29,7 @@ import {
   clearStoredResponderAuth,
   ResponderUser,
 } from './services/auth';
+import { logger } from './services/logger';
 
 export const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<ResponderUser | null>(() => {
@@ -78,16 +79,23 @@ export const App: React.FC = () => {
   useEffect(() => {
     const socket = getSocket(token);
 
-    socket.on('connect', () => setIsConnected(true));
-    socket.on('disconnect', () => setIsConnected(false));
+    socket.on('connect', () => {
+      setIsConnected(true);
+      logger.socket('Connected to Guardian Real-Time Dispatch Gateway');
+    });
+    socket.on('disconnect', () => {
+      setIsConnected(false);
+      logger.warn('Disconnected from Dispatch Gateway');
+    });
 
     // Listen for new distress triggers
     socket.on('nearby:broadcast', (alert: any) => {
-      console.log('🚨 New Distress Alert received via Socket.io:', alert);
+      logger.socket('🚨 New Distress Alert broadcast received via Socket.io:', alert);
       loadIncidents();
     });
 
     socket.on('incident:new', (newInc: Incident) => {
+      logger.socket(`🚨 New Incident received #${newInc.id} (${newInc.triggerType})`);
       setIncidents((prev) => [newInc, ...prev.filter((i) => i.id !== newInc.id)]);
       setSelectedIncident(newInc);
     });
@@ -112,16 +120,33 @@ export const App: React.FC = () => {
       }
     });
 
-    // Listen for responder status updates
-    socket.on('responder:status_changed', (payload: any) => {
+    // Listen for real-time incident status updates across Admin, Mobile, and Responders
+    const handleStatusUpdateEvent = (payload: any) => {
+      const incId = payload?.incidentId || payload?.id;
+      const status = payload?.status;
+      if (!incId || !status) return;
+
+      logger.socket(`Incident #${incId} status updated to ${status}`);
       setIncidents((prev) =>
-        prev.map((inc) =>
-          inc.id === payload.incidentId ? { ...inc, status: payload.status } : inc,
-        ),
+        prev.map((inc) => (inc.id === incId ? { ...inc, status } : inc)),
       );
-      if (selectedIncident?.id === payload.incidentId) {
-        setSelectedIncident((prev) => prev ? { ...prev, status: payload.status } : null);
-      }
+      setSelectedIncident((prev) =>
+        prev && prev.id === incId ? { ...prev, status } : prev,
+      );
+    };
+
+    socket.on('responder:status_changed', handleStatusUpdateEvent);
+    socket.on('incident:status_changed', handleStatusUpdateEvent);
+    socket.on('events.responder.status_change', handleStatusUpdateEvent);
+    socket.on('incident:updated', (updated: Incident) => {
+      if (!updated?.id) return;
+      logger.socket(`Incident #${updated.id} full payload updated (${updated.status})`);
+      setIncidents((prev) =>
+        prev.map((inc) => (inc.id === updated.id ? { ...inc, ...updated } : inc)),
+      );
+      setSelectedIncident((prev) =>
+        prev && prev.id === updated.id ? { ...prev, ...updated } : prev,
+      );
     });
 
     return () => {
@@ -130,9 +155,12 @@ export const App: React.FC = () => {
       socket.off('nearby:broadcast');
       socket.off('incident:new');
       socket.off('location:update');
-      socket.off('responder:status_changed');
+      socket.off('responder:status_changed', handleStatusUpdateEvent);
+      socket.off('incident:status_changed', handleStatusUpdateEvent);
+      socket.off('events.responder.status_change', handleStatusUpdateEvent);
+      socket.off('incident:updated');
     };
-  }, [token, selectedIncident]);
+  }, [token]);
 
   const handleSelectIncident = (inc: Incident) => {
     setSelectedIncident(inc);

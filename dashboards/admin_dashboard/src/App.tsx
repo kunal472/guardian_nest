@@ -27,6 +27,7 @@ import { IncidentHistory } from './components/IncidentHistory';
 import { SystemConfig } from './components/SystemConfig';
 import { AdminAuth } from './components/AdminAuth';
 import { getStoredAuth, clearStoredAuth, AdminAuthUser } from './services/auth';
+import { logger } from './services/logger';
 
 export const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<AdminAuthUser | null>(() => {
@@ -51,12 +52,14 @@ export const App: React.FC = () => {
       setActiveCount(data.activeIncidentsCount || 0);
       setUsers(data.users || []);
       setIncidents(data.incidents || []);
+      logger.debug(`Loaded ${data.users?.length || 0} users, ${data.incidents?.length || 0} incidents (Active: ${data.activeIncidentsCount})`);
     }
     setIsRefreshing(false);
   };
 
   useEffect(() => {
     if (currentUser) {
+      logger.info(`Admin session active for ${currentUser.name || currentUser.phone} (${currentUser.role})`);
       loadData();
       const interval = setInterval(loadData, 5000); // 5s GraphQL poll for admin analytics
       return () => clearInterval(interval);
@@ -64,11 +67,13 @@ export const App: React.FC = () => {
   }, [currentUser]);
 
   const handleRoleChange = async (userId: string, newRole: 'USER' | 'RESPONDER' | 'ADMIN') => {
+    logger.info(`Updating user ${userId} role to ${newRole}`);
     await fetchGraphQL(UPDATE_USER_ROLE, { userId, role: newRole });
     loadData();
   };
 
   const handleResolveIncident = async (incidentId: string, status: 'RESOLVED' | 'FALSE_ALARM') => {
+    logger.info(`Resolving incident ${incidentId} as ${status}`);
     await fetchGraphQL(RESOLVE_INCIDENT, { incidentId, status });
     loadData();
   };

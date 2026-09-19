@@ -1,5 +1,6 @@
 import { Platform } from 'react-native';
 import * as Location from 'expo-location';
+import { logger } from '../utils/logger';
 
 export interface LocationFix {
   lat: number;
@@ -13,13 +14,59 @@ export interface LocationFix {
 
 export type LocationCallback = (location: LocationFix) => void;
 
+/**
+ * Compute Haversine distance in meters between two GPS coordinate points
+ */
+export function computeHaversineMeters(
+  lat1: number,
+  lon1: number,
+  lat2: number,
+  lon2: number
+): number {
+  if (lat1 === 0 && lon1 === 0) return 999999;
+  if (lat2 === 0 && lon2 === 0) return 999999;
+  const R = 6371e3; // Earth radius in meters
+  const phi1 = (lat1 * Math.PI) / 180;
+  const phi2 = (lat2 * Math.PI) / 180;
+  const deltaPhi = ((lat2 - lat1) * Math.PI) / 180;
+  const deltaLambda = ((lon2 - lon1) * Math.PI) / 180;
+
+  const a =
+    Math.sin(deltaPhi / 2) * Math.sin(deltaPhi / 2) +
+    Math.cos(phi1) * Math.cos(phi2) * Math.sin(deltaLambda / 2) * Math.sin(deltaLambda / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+  return R * c;
+}
+
 class HardwareLocationService {
   private watchSubscription: Location.LocationSubscription | null = null;
   private webWatchId: number | null = null;
   private hasPermission: boolean | null = null;
   private isSimulatedMode: boolean = false;
-  private fallbackCoords: { lat: number; lng: number } = { lat: 40.7128, lng: -74.006 };
+  private fallbackCoords: { lat: number; lng: number } | null = null;
   private activeCallback: LocationCallback | null = null;
+
+  /**
+   * Ensure that the device Location Provider (GPS toggle) is enabled
+   */
+  public async ensureLocationServicesEnabled(): Promise<boolean> {
+    if (Platform.OS === 'web') return true;
+    try {
+      const enabled = await Location.hasServicesEnabledAsync();
+      if (!enabled && Platform.OS === 'android') {
+        try {
+          await Location.enableNetworkProviderAsync();
+          return await Location.hasServicesEnabledAsync();
+        } catch {
+          return false;
+        }
+      }
+      return enabled;
+    } catch {
+      return false;
+    }
+  }
 
   /**
    * Request permissions from OS for foreground geolocation
@@ -44,10 +91,10 @@ class HardwareLocationService {
   }
 
   /**
-   * Get single instantaneous high-accuracy GPS location fix
+   * Get single instantaneous high-accuracy GPS location fix with strict cache invalidation
    */
-  public async getCurrentLocation(): Promise<LocationFix> {
-    if (this.isSimulatedMode) {
+  public async getCurrentLocation(): Promise<LocationFix | null> {
+    if (this.isSimulatedMode && this.fallbackCoords) {
       return this.getSimulatedFix();
     }
 
@@ -56,36 +103,71 @@ class HardwareLocationService {
         return await this.getWebCurrentPosition();
       }
 
+      await this.ensureLocationServicesEnabled();
+
       const hasPerm = this.hasPermission ?? (await this.requestPermissions());
       if (!hasPerm) {
-        return this.getSimulatedFix();
+        return this.fallbackCoords ? this.getSimulatedFix() : null;
       }
 
-      const loc = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.Highest,
-      });
+      // 1. Fetch fresh high-accuracy position from satellite/network
+      try {
+        const loc = await Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.Balanced,
+        });
 
-      const fix: LocationFix = {
-        lat: loc.coords.latitude,
-        lng: loc.coords.longitude,
-        altitude: loc.coords.altitude,
-        accuracy: loc.coords.accuracy,
-        speed: loc.coords.speed,
-        heading: loc.coords.heading,
-        timestamp: new Date(loc.timestamp).toISOString(),
-      };
-      this.fallbackCoords = { lat: fix.lat, lng: fix.lng };
-      return fix;
+        if (loc && loc.coords && loc.coords.latitude !== 0) {
+          const fix: LocationFix = {
+            lat: loc.coords.latitude,
+            lng: loc.coords.longitude,
+            altitude: loc.coords.altitude,
+            accuracy: loc.coords.accuracy,
+            speed: loc.coords.speed,
+            heading: loc.coords.heading,
+            timestamp: new Date(loc.timestamp).toISOString(),
+          };
+          this.fallbackCoords = { lat: fix.lat, lng: fix.lng };
+          logger.telemetry(`Fresh GPS fix resolved: (${fix.lat.toFixed(5)}, ${fix.lng.toFixed(5)}) ±${fix.accuracy?.toFixed(1)}m`);
+          return fix;
+        }
+      } catch (freshErr) {
+        logger.warn('[HardwareLocation] getCurrentPositionAsync fallback to cached:', freshErr);
+      }
+
+      // 2. Fallback to last known position
+      try {
+        const lastKnown = await Location.getLastKnownPositionAsync({ maxAge: 120000 });
+        if (lastKnown && lastKnown.coords && lastKnown.coords.latitude !== 0) {
+          const timestampMs = typeof lastKnown.timestamp === 'number'
+            ? lastKnown.timestamp
+            : new Date(lastKnown.timestamp).getTime();
+
+          const fix: LocationFix = {
+            lat: lastKnown.coords.latitude,
+            lng: lastKnown.coords.longitude,
+            altitude: lastKnown.coords.altitude,
+            accuracy: lastKnown.coords.accuracy,
+            speed: lastKnown.coords.speed,
+            heading: lastKnown.coords.heading,
+            timestamp: new Date(timestampMs).toISOString(),
+          };
+          this.fallbackCoords = { lat: fix.lat, lng: fix.lng };
+          logger.telemetry(`Cached GPS fix fallback: (${fix.lat.toFixed(5)}, ${fix.lng.toFixed(5)}) ±${fix.accuracy?.toFixed(1)}m`);
+          return fix;
+        }
+      } catch {}
+
+      return this.fallbackCoords ? this.getSimulatedFix() : null;
     } catch (err) {
-      console.warn('[HardwareLocation] getCurrentLocation fallback to simulated:', err);
-      return this.getSimulatedFix();
+      console.warn('[HardwareLocation] getCurrentLocation fallback:', err);
+      return this.fallbackCoords ? this.getSimulatedFix() : null;
     }
   }
 
   /**
-   * Start live GPS tracking stream with instant initial fix and zero-meter distance interval
+   * Start live GPS tracking stream with dynamic accuracy escalation (High for SOS, Balanced for standby)
    * @param onUpdate callback invoked on every satellite fix
-   * @param isSosActive true = 1000ms high-priority emergency interval, false = 1500ms standby
+   * @param isSosActive true = 1000ms high-priority emergency interval, false = 2000ms standby
    */
   public async startTracking(onUpdate: LocationCallback, isSosActive: boolean): Promise<void> {
     this.stopTracking();
@@ -96,9 +178,9 @@ class HardwareLocationService {
       return;
     }
 
-    // 1. Instantly fetch initial position without waiting for watcher interval
+    // 1. Fetch initial fresh position asynchronously and only emit if genuine
     this.getCurrentLocation().then((initialFix) => {
-      if (this.activeCallback) {
+      if (initialFix && initialFix.lat !== 0 && this.activeCallback) {
         this.activeCallback(initialFix);
       }
     }).catch(() => {});
@@ -106,7 +188,7 @@ class HardwareLocationService {
     try {
       const hasPerm = this.hasPermission ?? (await this.requestPermissions());
       if (!hasPerm) {
-        this.startSimulatedTracking(onUpdate, isSosActive);
+        if (this.isSimulatedMode) this.startSimulatedTracking(onUpdate, isSosActive);
         return;
       }
 
@@ -115,16 +197,18 @@ class HardwareLocationService {
         return;
       }
 
-      // Native iOS / Android High-Accuracy Satellite Watcher
-      // distanceInterval: 0 ensures instantaneous response whenever GPS coordinates change in settings / emulator
-      const intervalMs = isSosActive ? 500 : 1000;
+      // Native iOS / Android Fused High-Accuracy Location Watcher
+      const intervalMs = isSosActive ? 1000 : 2000;
+      const accuracyMode = isSosActive ? Location.Accuracy.High : Location.Accuracy.Balanced;
+
       this.watchSubscription = await Location.watchPositionAsync(
         {
-          accuracy: Location.Accuracy.Highest,
+          accuracy: accuracyMode,
           timeInterval: intervalMs,
           distanceInterval: 0,
         },
         (loc) => {
+          if (!loc || !loc.coords || loc.coords.latitude === 0) return;
           const fix: LocationFix = {
             lat: loc.coords.latitude,
             lng: loc.coords.longitude,
@@ -141,17 +225,17 @@ class HardwareLocationService {
         }
       );
     } catch (err) {
-      console.warn('[HardwareLocation] Native watcher failed, falling back to simulated:', err);
-      this.startSimulatedTracking(onUpdate, isSosActive);
+      console.warn('[HardwareLocation] Native watcher failed:', err);
+      if (this.isSimulatedMode) this.startSimulatedTracking(onUpdate, isSosActive);
     }
   }
 
   /**
    * Force instantaneous GPS poll and invoke active callback immediately
    */
-  public async forceRefreshLocation(): Promise<LocationFix> {
+  public async forceRefreshLocation(): Promise<LocationFix | null> {
     const fix = await this.getCurrentLocation();
-    if (this.activeCallback) {
+    if (fix && fix.lat !== 0 && this.activeCallback) {
       this.activeCallback(fix);
     }
     return fix;
@@ -181,6 +265,17 @@ class HardwareLocationService {
   private simulatedTimer: any = null;
 
   private getSimulatedFix(): LocationFix {
+    if (!this.fallbackCoords) {
+      return {
+        lat: 0,
+        lng: 0,
+        altitude: 0,
+        accuracy: 0,
+        speed: 0,
+        heading: 0,
+        timestamp: new Date().toISOString(),
+      };
+    }
     const delta = (Math.random() - 0.5) * 0.0003;
     this.fallbackCoords = {
       lat: this.fallbackCoords.lat + delta,
@@ -260,7 +355,7 @@ class HardwareLocationService {
     }
   }
 
-  public setSimulatedMode(enabled: boolean, coords?: { lat: number; lng: number }): void {
+  public setSimulatedMode(enabled: boolean, coords?: { lat: number; lng: number } | null): void {
     this.isSimulatedMode = enabled;
     if (coords) this.fallbackCoords = coords;
   }

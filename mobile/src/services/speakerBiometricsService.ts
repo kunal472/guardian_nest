@@ -9,6 +9,7 @@ import {
   requestRecordingPermissionsAsync,
 } from "expo-audio";
 import { Platform } from "react-native";
+import { logger } from "../utils/logger";
 
 export interface SpeakerProfile {
   userId: string;
@@ -134,33 +135,63 @@ class SpeakerBiometricsService {
   public async recordLiveVoiceSample(
     promptNumber: number = 1,
   ): Promise<{ vector: number[]; sampleIndex: number; totalCompleted: number }> {
+    // Safe execution with 2.5s maximum timeout to prevent any button freeze
     try {
-      if (Platform.OS !== "web") {
-        await requestRecordingPermissionsAsync();
-        await setAudioModeAsync({
-          allowsRecording: true,
-          playsInSilentMode: true,
-          shouldPlayInBackground: false,
-          interruptionMode: "duckOthers",
-        });
+      const recordingTask = (async () => {
+        if (Platform.OS !== "web") {
+          try {
+            await requestRecordingPermissionsAsync();
+            await setAudioModeAsync({
+              allowsRecording: true,
+              playsInSilentMode: true,
+              shouldPlayInBackground: false,
+              interruptionMode: "duckOthers",
+            });
 
-        const options = {
-          isMeteringEnabled: true,
-          sampleRate: 16000,
-          numberOfChannels: 1,
-          bitRate: 64000,
-        };
+            const recordingOptions = {
+              extension: ".m4a",
+              sampleRate: 16000,
+              numberOfChannels: 1,
+              bitRate: 64000,
+              isMeteringEnabled: true,
+              android: {
+                outputFormat: "mpeg4",
+                audioEncoder: "aac",
+              },
+              ios: {
+                outputFormat: "aac ",
+                audioQuality: 96,
+                linearPCMBitDepth: 16,
+                linearPCMIsBigEndian: false,
+                linearPCMIsFloat: false,
+              },
+            };
 
-        const recorder = new AudioModule.AudioRecorder(options as any);
-        await recorder.prepareToRecordAsync(options as any);
-        recorder.record();
+            const recorder = new AudioModule.AudioRecorder(recordingOptions as any);
+            await recorder.prepareToRecordAsync(recordingOptions as any);
+            recorder.record();
 
-        // Record for 1.5 seconds
-        await new Promise((resolve) => setTimeout(resolve, 1500));
-        await recorder.stop();
-      } else {
-        await new Promise((resolve) => setTimeout(resolve, 1500));
-      }
+            // Record for 1.5 seconds
+            await new Promise((resolve) => setTimeout(resolve, 1500));
+            try {
+              await recorder.stop();
+            } catch (stopErr) {
+              console.warn("[SpeakerBiometrics] Stop error:", stopErr);
+            }
+            // Cooldown to ensure Android AudioRecord native handle releases
+            await new Promise((resolve) => setTimeout(resolve, 200));
+          } catch (nativeErr) {
+            console.warn("[SpeakerBiometrics] Native recorder note:", nativeErr);
+          }
+        } else {
+          await new Promise((resolve) => setTimeout(resolve, 1500));
+        }
+      })();
+
+      await Promise.race([
+        recordingTask,
+        new Promise((resolve) => setTimeout(resolve, 2500)),
+      ]);
     } catch (err) {
       console.warn("[SpeakerBiometrics] Live recording fallback:", err);
     }
@@ -255,14 +286,22 @@ class SpeakerBiometricsService {
     );
 
     const isMatch = similarity >= this.matchThreshold;
+    const confidencePercent = (similarity * 100).toFixed(1);
+    const thresholdPercent = (this.matchThreshold * 100).toFixed(0);
+
+    logger.biometrics(
+      `Voice Confidence: ${confidencePercent}% | Threshold: ${thresholdPercent}% | Match: ${
+        isMatch ? "✅ AUTHENTICATED (Owner)" : "❌ REJECTED (Bystander)"
+      }`
+    );
 
     return {
       isMatch,
       similarity,
       threshold: this.matchThreshold,
       reason: isMatch
-        ? `Authenticated Owner Voice (${(similarity * 100).toFixed(0)}% match >= ${(this.matchThreshold * 100).toFixed(0)}%)`
-        : `Rejected Bystander Voice (${(similarity * 100).toFixed(0)}% match < ${(this.matchThreshold * 100).toFixed(0)}%)`,
+        ? `Authenticated Owner Voice (${confidencePercent}% match >= ${thresholdPercent}%)`
+        : `Rejected Bystander Voice (${confidencePercent}% match < ${thresholdPercent}%)`,
       isEnrolled: true,
     };
   }

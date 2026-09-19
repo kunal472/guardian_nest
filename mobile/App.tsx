@@ -13,7 +13,9 @@ import {
   Linking,
   AppState,
   AppStateStatus,
+  PermissionsAndroid,
 } from "react-native";
+import { requestRecordingPermissionsAsync } from "expo-audio";
 import io, { Socket } from "socket.io-client";
 import {
   screamDetector,
@@ -27,6 +29,7 @@ import {
 } from "./src/services/authService";
 import {
   hardwareLocationService,
+  computeHaversineMeters,
   LocationFix,
 } from "./src/services/hardwareLocationService";
 import {
@@ -50,8 +53,9 @@ import {
 import { speakerBiometricsService } from "./src/services/speakerBiometricsService";
 import { nativeShutdownService } from "./src/services/nativeShutdownService";
 import { emergencySmsService } from "./src/services/emergencySmsService";
+import { logger } from "./src/utils/logger";
 
-const BACKEND_URL = "http://10.102.152.26:3000";
+const DEFAULT_BACKEND_URL = "http://10.102.152.72:3000";
 
 type TriggerType =
   | "MANUAL_SOS"
@@ -75,6 +79,7 @@ export default function App() {
     const auth = getStoredCitizenAuth();
     return auth ? auth.token : null;
   });
+  const [backendUrl, setBackendUrl] = useState<string>(DEFAULT_BACKEND_URL);
   const [isGuestBypass, setIsGuestBypass] = useState<boolean>(false);
 
   const [isSosActive, setIsSosActive] = useState<boolean>(false);
@@ -87,10 +92,9 @@ export default function App() {
   const [nearbyAlert, setNearbyAlert] = useState<any | null>(null);
   const [isStealthMode, setIsStealthMode] = useState<boolean>(false);
   const [calculatorInput, setCalculatorInput] = useState<string>("0");
-  const [coords, setCoords] = useState<{ lat: number; lng: number }>({
-    lat: 40.7128,
-    lng: -74.006,
-  });
+  const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(
+    null,
+  );
   const [locationAccuracy, setLocationAccuracy] = useState<number | null>(null);
   const [locationSpeed, setLocationSpeed] = useState<number | null>(null);
   const [isHardwareGps, setIsHardwareGps] = useState<boolean>(true);
@@ -137,6 +141,8 @@ export default function App() {
       speakerBiometrics: null,
       ringBufferFill: 0,
       ringBufferSeconds: 0,
+      liveAudioEnergyPercent: 8,
+      liveDbfs: -55.0,
       lastEventTimestamp: null,
     },
   );
@@ -175,7 +181,8 @@ export default function App() {
   });
 
   const socketRef = useRef<Socket | null>(null);
-  const coordsRef = useRef(coords);
+  const coordsRef = useRef<{ lat: number; lng: number } | null>(coords);
+  const lastEmittedLocationRef = useRef<{ lat: number; lng: number; time: number } | null>(null);
   const batteryRef = useRef(batteryLevel);
   const isSosActiveRef = useRef(isSosActive);
   const incidentIdRef = useRef(incidentId);
@@ -185,10 +192,102 @@ export default function App() {
 
   // Calibration Prompts Guide
   const CALIBRATION_PROMPTS = [
-    { step: 1, phrase: "Help Me Guardian", desc: "Speak naturally into the phone" },
+    {
+      step: 1,
+      phrase: "Help Me Guardian",
+      desc: "Speak naturally into the phone",
+    },
     { step: 2, phrase: "Emergency SOS", desc: "Speak with clear authority" },
     { step: 3, phrase: "Stop It Now", desc: "Speak with loud commanding tone" },
   ];
+
+  // Request all hardware permissions (Microphone, Location, Notifications) & verify GPS provider
+  useEffect(() => {
+    const requestHardwareCapabilities = async () => {
+      if (Platform.OS === "android") {
+        try {
+          const permissionsToRequest = [
+            PermissionsAndroid.PERMISSIONS.RECORD_AUDIO,
+            PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
+            PermissionsAndroid.PERMISSIONS.ACCESS_COARSE_LOCATION,
+          ];
+          if (typeof Platform.Version === "number" && Platform.Version >= 33) {
+            permissionsToRequest.push(
+              PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS,
+            );
+          }
+          const results =
+            await PermissionsAndroid.requestMultiple(permissionsToRequest);
+          logger.info("[Guardian Startup] Android Permissions Granted:", results);
+
+          // 1. Check if GPS / Location Provider is enabled on device
+          const isLocationEnabled = await hardwareLocationService.ensureLocationServicesEnabled();
+          if (!isLocationEnabled) {
+            Alert.alert(
+              "🛰️ Enable Device GPS",
+              "Guardian Edge requires Location services to track your emergency SOS in real-time. Please turn on Location in quick settings.",
+              [
+                { text: "Dismiss", style: "cancel" },
+                {
+                  text: "Turn On GPS",
+                  onPress: () => hardwareLocationService.ensureLocationServicesEnabled(),
+                },
+              ],
+            );
+          }
+
+          // 2. Check if Mic permission is granted
+          const micGranted =
+            results[PermissionsAndroid.PERMISSIONS.RECORD_AUDIO] ===
+            PermissionsAndroid.RESULTS.GRANTED;
+          if (!micGranted) {
+            Alert.alert(
+              "🎙️ Microphone Required",
+              "Always-on acoustic distress detection requires microphone permission. Please allow microphone access.",
+              [
+                { text: "Dismiss", style: "cancel" },
+                { text: "Open Settings", onPress: () => Linking.openSettings() },
+              ],
+            );
+          }
+        } catch (e) {
+          logger.warn("[Guardian Startup] Android permission request error:", e);
+        }
+      } else if (Platform.OS === "ios") {
+        try {
+          await requestRecordingPermissionsAsync();
+          await hardwareLocationService.requestPermissions();
+        } catch (e) {
+          logger.warn("[Guardian Startup] iOS permission request error:", e);
+        }
+      }
+    };
+
+    requestHardwareCapabilities();
+
+    // Re-verify GPS and Mic when app returns from background / Settings toggle
+    const sub = AppState.addEventListener(
+      "change",
+      async (nextState: AppStateStatus) => {
+        if (nextState === "active") {
+          logger.info(
+            "[Guardian] App returned to active foreground. Re-validating hardware...",
+          );
+          await hardwareLocationService.ensureLocationServicesEnabled();
+          const freshFix = await hardwareLocationService.forceRefreshLocation();
+          if (freshFix && freshFix.lat !== 0) {
+            setCoords({ lat: freshFix.lat, lng: freshFix.lng });
+            if (freshFix.accuracy) setLocationAccuracy(freshFix.accuracy);
+          }
+          twoTierDistressPipeline.startPipeline();
+        }
+      },
+    );
+
+    return () => {
+      sub.remove();
+    };
+  }, []);
 
   // Subscribe to Speaker Biometrics Profile Changes
   useEffect(() => {
@@ -227,6 +326,8 @@ export default function App() {
     return unsub;
   }, []);
 
+  const [resolutionNotice, setResolutionNotice] = useState<string | null>(null);
+
   // Synchronize ref states
   useEffect(() => {
     coordsRef.current = coords;
@@ -250,21 +351,39 @@ export default function App() {
     currentUserRef.current = currentUser;
   }, [currentUser]);
 
+  const cancelDistress = () => {
+    setIsSosActive(false);
+    setIncidentId(null);
+    setResponderStatus(null);
+    setDeadmanSeconds(null);
+    setLastGaspSent(false);
+    setShutdownLastGaspNotice(null);
+    hardwareAudioVaultService.reset();
+  };
+
   // Handle Interactive Voice Calibration Recorder
-  const handleStartVoiceCalibration = () => {
+  const handleStartVoiceCalibration = async () => {
+    await twoTierDistressPipeline.pauseNativeSpotter('CALIBRATING', 200);
     setIsCalibratingVoice(true);
     setCalibrationStep(1);
     setRecordedSamplesCount(0);
     setEnrollmentNotice("Calibration Mode: Ready to capture 3 voice samples.");
   };
 
+  const handleCancelVoiceCalibration = async () => {
+    setIsCalibratingVoice(false);
+    setCalibrationStep(1);
+    setRecordedSamplesCount(0);
+    setEnrollmentNotice(null);
+    await twoTierDistressPipeline.resumeNativeSpotter(150);
+  };
+
   const handleRecordCalibrationSample = async () => {
     if (isRecordingVoiceSample) return;
     setIsRecordingVoiceSample(true);
     try {
-      const result = await speakerBiometricsService.recordLiveVoiceSample(
-        calibrationStep,
-      );
+      const result =
+        await speakerBiometricsService.recordLiveVoiceSample(calibrationStep);
       setRecordedSamplesCount(result.totalCompleted);
 
       if (calibrationStep < 3) {
@@ -284,6 +403,7 @@ export default function App() {
           "🎉 Voice Profile Successfully Enrolled (3/3 Verified Samples)!",
         );
         setTimeout(() => setEnrollmentNotice(null), 5000);
+        await twoTierDistressPipeline.resumeNativeSpotter(150);
       }
     } catch (err: any) {
       Alert.alert(
@@ -301,8 +421,8 @@ export default function App() {
       (c) => c.phoneNumber,
     );
     nativeShutdownService.updateTelemetry(
-      coords.lat,
-      coords.lng,
+      coords?.lat ?? 0,
+      coords?.lng ?? 0,
       batteryLevel,
       incidentId,
       contactPhones,
@@ -314,7 +434,7 @@ export default function App() {
   const dispatchPreShutdownLastGasp = (reason: string = "OS_SHUTDOWN") => {
     const beacon = nativeShutdownService.dispatchPreShutdownBeacon(
       reason,
-      BACKEND_URL,
+      backendUrl,
     );
     setShutdownLastGaspNotice(
       `Final GPS (${beacon.lat.toFixed(5)}, ${beacon.lng.toFixed(5)}) dispatched via Pre-Shutdown Beacon (${beacon.reason}).`,
@@ -334,9 +454,15 @@ export default function App() {
     };
   }, []);
 
+  // Synchronize Hardware Audio Vault target backend URL and auth
+  useEffect(() => {
+    hardwareAudioVaultService.setBackendUrl(backendUrl, authToken);
+  }, [backendUrl, authToken]);
+
   // Initialize Socket.IO connection
   useEffect(() => {
-    const socket = io(BACKEND_URL, {
+    hardwareAudioVaultService.setBackendUrl(backendUrl, authToken);
+    const socket = io(backendUrl, {
       auth: { token: authToken || "demo_mobile_token" },
       transports: ["websocket", "polling"],
       reconnectionAttempts: 10,
@@ -346,22 +472,46 @@ export default function App() {
 
     socket.on("connect", () => {
       setIsConnected(true);
-      console.log("Mobile Edge Client connected to Guardian Event Bus");
+      logger.info(
+        `Mobile Edge Client connected to Guardian Event Bus at ${backendUrl}`,
+      );
     });
 
     socket.on("disconnect", () => {
       setIsConnected(false);
-      console.log("Mobile disconnected from Event Bus");
+      logger.warn("Mobile disconnected from Event Bus");
     });
 
     socket.on("distress:acknowledged", (data: any) => {
+      logger.info("Distress acknowledged by server:", data);
       setIncidentId(data.incidentId);
-      hardwareAudioVaultService.startEvidenceCapture(data.incidentId, 30);
+      hardwareAudioVaultService.startEvidenceCapture(
+        data.incidentId,
+        30,
+        backendUrl,
+      );
     });
 
-    socket.on("events.responder.status_change", (data: any) => {
-      setResponderStatus(data.status);
-    });
+    // Cross-Platform Incident Status Synchronization & SOS Auto-Disarm
+    const handleStatusUpdate = (data: any) => {
+      const status = data?.status || data?.incident?.status;
+      if (!status) return;
+
+      setResponderStatus(status);
+
+      if (status === "RESOLVED" || status === "FALSE_ALARM") {
+        logger.info(`[EventBus] 🛡️ Incident marked ${status}. Disarming mobile SOS.`);
+        cancelDistress();
+        setResolutionNotice(
+          `🛡️ Incident #${data.incidentId || incidentId || "SOS"} marked ${status} by Dispatcher/Responder.`,
+        );
+        setTimeout(() => setResolutionNotice(null), 8000);
+      }
+    };
+
+    socket.on("events.responder.status_change", handleStatusUpdate);
+    socket.on("incident:status_changed", handleStatusUpdate);
+    socket.on("incident:updated", handleStatusUpdate);
 
     socket.on("nearby:broadcast", (alertData: any) => {
       setNearbyAlert(alertData);
@@ -414,7 +564,7 @@ export default function App() {
     return () => {
       socket.disconnect();
     };
-  }, [authToken]);
+  }, [authToken, backendUrl]);
 
   // Flush Offline Queue when connectivity is restored
   useEffect(() => {
@@ -491,7 +641,7 @@ export default function App() {
 
     try {
       if (incidentId) {
-        await fetch(`${BACKEND_URL}/api/incidents/${incidentId}/location`, {
+        await fetch(`${backendUrl}/api/incidents/${incidentId}/location`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ lat, lng, batteryLevel: currentBattery }),
@@ -540,7 +690,14 @@ export default function App() {
       setLocationAccuracy(loc.accuracy ?? null);
       setLocationSpeed(loc.speed ?? null);
 
+      const now = Date.now();
+      const lastEmitted = lastEmittedLocationRef.current;
+      const distanceMoved = lastEmitted
+        ? computeHaversineMeters(lastEmitted.lat, lastEmitted.lng, loc.lat, loc.lng)
+        : 999999;
+
       if (isSosActiveRef.current) {
+        lastEmittedLocationRef.current = { lat: loc.lat, lng: loc.lng, time: now };
         transmitLocation(
           loc.lat,
           loc.lng,
@@ -552,11 +709,15 @@ export default function App() {
         socketRef.current?.connected &&
         !isSimulatedOfflineRef.current
       ) {
-        socketRef.current.emit("volunteer:location_update", {
-          volunteerId: currentUserRef.current?.id || "u_mobile_volunteer",
-          lat: loc.lat,
-          lng: loc.lng,
-        });
+        // Stationary Throttling: Only emit over network if moved >= 5m or 30s has passed (heartbeat)
+        if (distanceMoved >= 5 || !lastEmitted || now - lastEmitted.time >= 30000) {
+          lastEmittedLocationRef.current = { lat: loc.lat, lng: loc.lng, time: now };
+          socketRef.current.emit("volunteer:location_update", {
+            volunteerId: currentUserRef.current?.id || "u_mobile_volunteer",
+            lat: loc.lat,
+            lng: loc.lng,
+          });
+        }
       }
     };
 
@@ -577,7 +738,7 @@ export default function App() {
       setBatteryState(info.state);
       setIsLowPowerMode(info.isLowPowerMode);
 
-      if (info.isCritical && !lastGaspSent) {
+      if (info.isCritical && !lastGaspSent && coordsRef.current) {
         setLastGaspSent(true);
         dispatchPreShutdownLastGasp("CRITICAL_BATTERY_EVENT");
         transmitLocation(
@@ -640,14 +801,31 @@ export default function App() {
   }, [deadmanSeconds]);
 
   // Trigger SOS Event
-  const triggerDistress = (type: TriggerType = triggerType) => {
+  const triggerDistress = async (type: TriggerType = triggerType) => {
     setIsSosActive(true);
     setTriggerType(type);
     setResponderStatus("ALERTING_DISPATCH");
     setLastGaspSent(false);
 
+    // If coordinates are null or 0, force refresh GPS fix before sending payload
+    let targetCoords = coordsRef.current;
+    if (!targetCoords || (targetCoords.lat === 0 && targetCoords.lng === 0)) {
+      const freshFix = await hardwareLocationService.forceRefreshLocation();
+      if (freshFix && freshFix.lat !== 0) {
+        targetCoords = { lat: freshFix.lat, lng: freshFix.lng };
+        setCoords(targetCoords);
+      }
+    }
+
+    const currentLat = targetCoords?.lat ?? 0;
+    const currentLng = targetCoords?.lng ?? 0;
+
     // Automatically initialize 30s emergency audio evidence capture
-    hardwareAudioVaultService.startEvidenceCapture(incidentId || undefined, 30);
+    hardwareAudioVaultService.startEvidenceCapture(
+      incidentId || undefined,
+      30,
+      backendUrl,
+    );
 
     if (
       socketRef.current &&
@@ -659,8 +837,8 @@ export default function App() {
         userName: currentUser?.name || "Citizen User",
         phone: currentUser?.phone || "+1555019888",
         emergencyContacts: currentUser?.emergencyContacts,
-        lat: coords.lat,
-        lng: coords.lng,
+        lat: currentLat,
+        lng: currentLng,
         triggerType: type,
         batteryLevel: Math.round(batteryLevel),
         evidenceAudioUrl: `s3://guardian-vault/${Date.now()}.m4a`,
@@ -668,21 +846,29 @@ export default function App() {
     } else {
       setIncidentId(`inc_offline_${Date.now()}`);
       setLastTransmissionMethod("Triggered in Offline Queue");
-      if (batteryLevel <= 5) {
-        triggerSmsFallback(coords.lat, coords.lng, Math.round(batteryLevel));
+
+      // Also attempt background HTTP REST trigger to ensure backend gets alerted
+      fetch(`${backendUrl}/api/incidents`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+        },
+        body: JSON.stringify({
+          lat: currentLat,
+          lng: currentLng,
+          triggerType: type,
+          batteryLevel: Math.round(batteryLevel),
+          evidenceAudioUrl: `s3://guardian-vault/${Date.now()}.m4a`,
+        }),
+      }).catch((e) => console.log("[Distress REST Fallback]:", e?.message));
+
+      if (batteryLevel <= 5 && targetCoords) {
+        triggerSmsFallback(currentLat, currentLng, Math.round(batteryLevel));
       }
     }
   };
 
-  const cancelDistress = () => {
-    setIsSosActive(false);
-    setIncidentId(null);
-    setResponderStatus(null);
-    setDeadmanSeconds(null);
-    setLastGaspSent(false);
-    setShutdownLastGaspNotice(null);
-    hardwareAudioVaultService.reset();
-  };
 
   const handleLogout = () => {
     clearStoredCitizenAuth();
@@ -734,7 +920,8 @@ export default function App() {
   if (!currentUser && !isGuestBypass) {
     return (
       <CitizenAuth
-        backendUrl={BACKEND_URL}
+        backendUrl={backendUrl}
+        onUpdateBackendUrl={(url) => setBackendUrl(url)}
         onAuthSuccess={(user, token) => {
           setCurrentUser(user);
           setAuthToken(token);
@@ -869,6 +1056,44 @@ export default function App() {
           </View>
         </View>
 
+        {/* Live Server Host & Connectivity Banner */}
+        <View
+          style={{
+            backgroundColor: isConnected
+              ? "rgba(16, 185, 129, 0.12)"
+              : "rgba(239, 68, 68, 0.15)",
+            borderColor: isConnected
+              ? "rgba(16, 185, 129, 0.3)"
+              : "rgba(239, 68, 68, 0.35)",
+            borderWidth: 1,
+            borderRadius: 8,
+            paddingHorizontal: 10,
+            paddingVertical: 6,
+            marginBottom: 12,
+            flexDirection: "row",
+            alignItems: "center",
+            justifyContent: "space-between",
+          }}
+        >
+          <Text
+            style={{
+              fontSize: 11,
+              color: isConnected ? "#6ee7b7" : "#fca5a5",
+              fontWeight: "700",
+            }}
+            numberOfLines={1}
+          >
+            {isConnected ? "🟢 ONLINE" : "🔴 OFFLINE"}: {backendUrl}
+          </Text>
+          <Text style={{ fontSize: 10, color: "#94a3b8" }}>
+            {pingCount > 0
+              ? `${pingCount} pings sent`
+              : isConnected
+                ? "Connected"
+                : "Check Wi-Fi / IP"}
+          </Text>
+        </View>
+
         {/* Citizen Profile Card */}
         {currentUser && (
           <View style={styles.citizenProfileCard}>
@@ -945,8 +1170,20 @@ export default function App() {
           </View>
         )}
 
+        {/* Incident Resolution Notice */}
+        {resolutionNotice && (
+          <View style={styles.resolutionBanner}>
+            <Text style={styles.resolutionBannerTitle}>
+              🛡️ EMERGENCY INCIDENT RESOLVED
+            </Text>
+            <Text style={styles.resolutionBannerSub}>
+              {resolutionNotice}
+            </Text>
+          </View>
+        )}
+
         {/* Dynamic Responder Alert Notification */}
-        {responderStatus && (
+        {responderStatus && isSosActive && (
           <View style={styles.responderBanner}>
             <Text style={styles.responderBannerTitle}>
               {responderStatus === "DISPATCHED"
@@ -1007,8 +1244,8 @@ export default function App() {
             >
               <Text style={styles.modelStatusBadgeText}>
                 {pipelineTelemetry.isPipelineActive
-                  ? "🟢 T1+T2 ARMED"
-                  : "OFFLINE"}
+                  ? "🟢 ARMED (ON-DEVICE)"
+                  : "⚪ STANDBY"}
               </Text>
             </View>
           </View>
@@ -1032,11 +1269,51 @@ export default function App() {
                 }}
               >
                 {pipelineTelemetry.tier1Status === "spotting"
-                  ? "⚡ SPOTTING"
+                  ? "⚡ SPOTTING (16kHz)"
                   : pipelineTelemetry.tier1Status === "triggered"
                     ? "🚨 TRIGGERED"
                     : "IDLE"}
               </Text>
+            </View>
+
+            {/* Real-Time Acoustic Microphone Amplitude Meter */}
+            <View style={{ marginTop: 8 }}>
+              <View style={styles.rowBetween}>
+                <Text style={styles.metaLabel}>Live Vocal Amplitude (Mic):</Text>
+                <Text
+                  style={[
+                    styles.metaValue,
+                    {
+                      color:
+                        (pipelineTelemetry.liveAudioEnergyPercent ?? 0) > 60
+                          ? "#ef4444"
+                          : (pipelineTelemetry.liveAudioEnergyPercent ?? 0) > 30
+                            ? "#fbbf24"
+                            : "#10b981",
+                      fontWeight: "800",
+                    },
+                  ]}
+                >
+                  {(pipelineTelemetry.liveDbfs ?? -55.0).toFixed(1)} dBFS (
+                  {pipelineTelemetry.liveAudioEnergyPercent ?? 0}%)
+                </Text>
+              </View>
+              <View style={styles.meterTrack}>
+                <View
+                  style={[
+                    styles.meterFill,
+                    {
+                      width: `${pipelineTelemetry.liveAudioEnergyPercent ?? 8}%`,
+                      backgroundColor:
+                        (pipelineTelemetry.liveAudioEnergyPercent ?? 0) > 60
+                          ? "#ef4444"
+                          : (pipelineTelemetry.liveAudioEnergyPercent ?? 0) > 30
+                            ? "#fbbf24"
+                            : "#10b981",
+                    },
+                  ]}
+                />
+              </View>
             </View>
 
             <View style={styles.metaStack}>
@@ -1144,9 +1421,7 @@ export default function App() {
 
             {enrollmentNotice && (
               <View style={styles.noticeMiniBox}>
-                <Text style={styles.noticeMiniText}>
-                  ✨ {enrollmentNotice}
-                </Text>
+                <Text style={styles.noticeMiniText}>✨ {enrollmentNotice}</Text>
               </View>
             )}
 
@@ -1164,12 +1439,20 @@ export default function App() {
               >
                 <View style={styles.rowBetween}>
                   <Text
-                    style={{ fontSize: 11, fontWeight: "800", color: "#f3e8ff" }}
+                    style={{
+                      fontSize: 11,
+                      fontWeight: "800",
+                      color: "#f3e8ff",
+                    }}
                   >
                     🎙️ CALIBRATING PROMPT {calibrationStep} OF 3
                   </Text>
                   <Text
-                    style={{ fontSize: 10, fontWeight: "700", color: "#c084fc" }}
+                    style={{
+                      fontSize: 10,
+                      fontWeight: "700",
+                      color: "#c084fc",
+                    }}
                   >
                     {recordedSamplesCount}/3 Recorded
                   </Text>
@@ -1252,7 +1535,7 @@ export default function App() {
                     style={[styles.actionBtn, { flex: 0.8 }]}
                     activeOpacity={0.8}
                     disabled={isRecordingVoiceSample}
-                    onPress={() => setIsCalibratingVoice(false)}
+                    onPress={handleCancelVoiceCalibration}
                   >
                     <Text style={[styles.actionBtnText, { color: "#94a3b8" }]}>
                       Cancel
@@ -1497,7 +1780,7 @@ export default function App() {
             onPress={() => {
               if (audioVault.status === "recording") {
                 hardwareAudioVaultService.stopAndSecure(
-                  BACKEND_URL,
+                  backendUrl,
                   authToken || undefined,
                 );
               } else {
@@ -1520,7 +1803,9 @@ export default function App() {
         <View style={styles.card}>
           <View style={styles.cardHeaderRow}>
             <Text style={styles.cardTitle}>Network & Battery Armor</Text>
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+            <View
+              style={{ flexDirection: "row", alignItems: "center", gap: 6 }}
+            >
               {isLowPowerMode && (
                 <View style={styles.badgeSmallOrange}>
                   <Text style={styles.badgeSmallOrangeText}>LOW POWER</Text>
@@ -1596,8 +1881,19 @@ export default function App() {
                 setBatteryLevel(4);
                 setLastGaspSent(true);
                 dispatchPreShutdownLastGasp("MANUAL_CRITICAL_BATTERY_QA");
-                transmitLocation(coordsRef.current.lat, coordsRef.current.lng, 4, true);
-                triggerSmsFallback(coordsRef.current.lat, coordsRef.current.lng, 4);
+                if (coordsRef.current) {
+                  transmitLocation(
+                    coordsRef.current.lat,
+                    coordsRef.current.lng,
+                    4,
+                    true,
+                  );
+                  triggerSmsFallback(
+                    coordsRef.current.lat,
+                    coordsRef.current.lng,
+                    4,
+                  );
+                }
               }}
             >
               <Text style={styles.battBtnCriticalText}>4% (Dying)</Text>
@@ -1667,13 +1963,15 @@ export default function App() {
             <TouchableOpacity
               style={[styles.actionBtn, styles.actionBtnBlue, { flex: 1 }]}
               activeOpacity={0.8}
-              onPress={() =>
-                triggerSmsFallback(
-                  coords.lat,
-                  coords.lng,
-                  Math.round(batteryLevel),
-                )
-              }
+              onPress={() => {
+                if (coords) {
+                  triggerSmsFallback(
+                    coords.lat,
+                    coords.lng,
+                    Math.round(batteryLevel),
+                  );
+                }
+              }}
             >
               <Text style={[styles.actionBtnText, { color: "#93c5fd" }]}>
                 📱 Emergency SMS
@@ -1700,7 +1998,9 @@ export default function App() {
           <View style={styles.rowBetween}>
             <Text style={styles.metaLabel}>Coordinates:</Text>
             <Text style={styles.metaValue}>
-              {coords.lat.toFixed(5)}, {coords.lng.toFixed(5)}
+              {coords && (coords.lat !== 0 || coords.lng !== 0)
+                ? `${coords.lat.toFixed(5)}, ${coords.lng.toFixed(5)}`
+                : "🛰️ Acquiring GPS..."}
             </Text>
           </View>
 
@@ -1742,10 +2042,13 @@ export default function App() {
               style={[styles.actionBtn, { flex: 1 }]}
               activeOpacity={0.8}
               onPress={async () => {
-                const fix = await hardwareLocationService.forceRefreshLocation();
-                setCoords({ lat: fix.lat, lng: fix.lng });
-                if (fix.accuracy) setLocationAccuracy(fix.accuracy);
-                if (fix.speed) setLocationSpeed(fix.speed);
+                const fix =
+                  await hardwareLocationService.forceRefreshLocation();
+                if (fix && fix.lat !== 0) {
+                  setCoords({ lat: fix.lat, lng: fix.lng });
+                  if (fix.accuracy) setLocationAccuracy(fix.accuracy);
+                  if (fix.speed) setLocationSpeed(fix.speed);
+                }
               }}
             >
               <Text style={styles.actionBtnText}>🔄 Force GPS Poll</Text>
@@ -1757,9 +2060,7 @@ export default function App() {
               onPress={() => setIsHardwareGps(!isHardwareGps)}
             >
               <Text style={[styles.actionBtnText, { color: "#d8b4fe" }]}>
-                {isHardwareGps
-                  ? "Switch to Sim GPS"
-                  : "Switch to Real GPS"}
+                {isHardwareGps ? "Switch to Sim GPS" : "Switch to Real GPS"}
               </Text>
             </TouchableOpacity>
           </View>
@@ -1800,7 +2101,9 @@ export default function App() {
               <View style={styles.rowBetween}>
                 <Text style={styles.metaLabel}>Vector [X, Y, Z]:</Text>
                 <Text style={[styles.metaValue, { fontSize: 11 }]}>
-                  [{motionTelemetry.x.toFixed(1)}, {motionTelemetry.y.toFixed(1)}, {motionTelemetry.z.toFixed(1)}]
+                  [{motionTelemetry.x.toFixed(1)},{" "}
+                  {motionTelemetry.y.toFixed(1)}, {motionTelemetry.z.toFixed(1)}
+                  ]
                 </Text>
               </View>
 
@@ -2438,6 +2741,24 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontSize: 11,
     marginTop: 2,
+  },
+  resolutionBanner: {
+    backgroundColor: "rgba(16, 185, 129, 0.25)",
+    borderWidth: 1,
+    borderColor: "#10b981",
+    borderRadius: 10,
+    padding: 12,
+    marginBottom: 12,
+  },
+  resolutionBannerTitle: {
+    color: "#34d399",
+    fontWeight: "900",
+    fontSize: 13,
+  },
+  resolutionBannerSub: {
+    color: "#ecfdf5",
+    fontSize: 11,
+    marginTop: 3,
   },
   shutdownNoticeBanner: {
     backgroundColor: "rgba(16, 185, 129, 0.2)",

@@ -1,6 +1,7 @@
-import { Body, Controller, Get, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Inject, Param, Patch, Post, Query, Req, UseGuards, forwardRef } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { IncidentsService } from './incidents.service';
+import { SosGateway } from '../gateway/sos.gateway';
 import { CreateIncidentDto } from './dto/create-incident.dto';
 import { IncidentStatus } from '@prisma/client';
 import * as fs from 'fs';
@@ -10,7 +11,10 @@ import { pipeline } from 'stream/promises';
 @Controller('api/incidents')
 @UseGuards(JwtAuthGuard)
 export class IncidentsController {
-  constructor(private incidentsService: IncidentsService) {}
+  constructor(
+    private incidentsService: IncidentsService,
+    @Inject(forwardRef(() => SosGateway)) private sosGateway: SosGateway,
+  ) {}
 
   @Post()
   async createIncident(@Req() req: any, @Body() dto: CreateIncidentDto) {
@@ -109,7 +113,9 @@ export class IncidentsController {
     @Param('id') id: string,
     @Body('status') status: IncidentStatus,
   ) {
-    return this.incidentsService.updateStatus(id, status, req.user.id);
+    const updated = await this.incidentsService.updateStatus(id, status, req.user?.id);
+    this.sosGateway.broadcastStatusChange(updated.id, status, req.user?.id, updated);
+    return updated;
   }
 
   @Post(':id/notify-contacts')

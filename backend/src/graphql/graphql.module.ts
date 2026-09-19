@@ -3,6 +3,7 @@ import { GraphQLModule } from '@nestjs/graphql';
 import { ApolloDriver, ApolloDriverConfig } from '@nestjs/apollo';
 import { AdminResolver } from './resolvers/admin.resolver';
 import { IncidentsModule } from '../incidents/incidents.module';
+import { GatewayModule } from '../gateway/gateway.module';
 
 @Module({
   imports: [
@@ -14,6 +15,7 @@ import { IncidentsModule } from '../incidents/incidents.module';
       introspection: true,
     }),
     IncidentsModule,
+    GatewayModule,
   ],
   providers: [AdminResolver],
 })

@@ -163,6 +163,8 @@ export class IncidentsService {
       }
     }
 
+    const isValidUserUuid = resolvedByUserId && this.isUuid(resolvedByUserId);
+
     const incident = await this.prisma.incident.update({
       where: { id: targetId },
       data: {
@@ -170,7 +172,7 @@ export class IncidentsService {
         ...(status === IncidentStatus.RESOLVED || status === IncidentStatus.FALSE_ALARM
           ? {
               resolvedAt: new Date(),
-              resolvedByUserId,
+              ...(isValidUserUuid ? { resolvedByUserId } : {}),
             }
           : {}),
       },

@@ -1,6 +1,7 @@
 import { Args, Float, ID, Int, Mutation, Query, Resolver } from '@nestjs/graphql';
 import { PrismaService } from '../../prisma/prisma.service';
 import { IncidentsService } from '../../incidents/incidents.service';
+import { SosGateway } from '../../gateway/sos.gateway';
 import { User, Incident, SystemConfigModel } from '../types/models';
 import { UserRole, IncidentStatus } from '@prisma/client';
 
@@ -9,6 +10,7 @@ export class AdminResolver {
   constructor(
     private prisma: PrismaService,
     private incidentsService: IncidentsService,
+    private sosGateway: SosGateway,
   ) {}
 
   @Query(() => [User])
@@ -140,6 +142,7 @@ export class AdminResolver {
     @Args('status', { type: () => IncidentStatus }) status: IncidentStatus,
   ): Promise<Incident> {
     const inc = await this.incidentsService.updateStatus(incidentId, status);
+    this.sosGateway.broadcastStatusChange(inc.id, status, undefined, inc);
     return {
       ...inc,
       startedAt: inc.startedAt.toISOString(),
