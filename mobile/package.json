@@ -9,7 +9,11 @@
     "web": "expo start --web",
     "download:models": "curl -L -o ./assets/models/ggml-tiny.en.bin https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en.bin && curl -L -o ./assets/models/yamnet.tflite https://storage.googleapis.com/tfhub-modules/google/lite-model/yamnet/tflite/1.tflite",
     "build:android": "cd android && ./gradlew.bat assembleRelease",
-    "build:android:debug": "cd android && gradlew.bat assembleDebug"
+    "build:android:debug": "cd android && gradlew.bat assembleDebug",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
+    "test:e2e:device": "bash ./scripts/run-device-tests.sh"
   },
   "dependencies": {
     "guardian-audio": "file:./modules/guardian-audio",
@@ -30,7 +34,16 @@
   },
   "devDependencies": {
     "@babel/core": "^7.29.0",
+    "@react-native/jest-preset": "^0.87.1",
+    "@testing-library/react-hooks": "^8.0.1",
+    "@testing-library/react-native": "^13.0.1",
+    "@types/jest": "^29.5.14",
     "@types/react": "^19.2.18",
+    "babel-jest": "^29.7.0",
+    "babel-preset-expo": "^57.0.12",
+    "jest": "^29.7.0",
+    "jest-expo": "^57.0.5",
+    "react-test-renderer": "19.2.3",
     "typescript": "~6.0.3"
   },
   "private": true

@@ -14,6 +14,8 @@ import {
   AppState,
   AppStateStatus,
   PermissionsAndroid,
+  Modal,
+  Vibration,
 } from "react-native";
 import { requestRecordingPermissionsAsync } from "expo-audio";
 import io, { Socket } from "socket.io-client";
@@ -61,7 +63,8 @@ type TriggerType =
   | "MANUAL_SOS"
   | "AUDIO_SCREAM"
   | "DEVICE_SNATCH"
-  | "DEAD_MAN_SWITCH";
+  | "DEAD_MAN_SWITCH"
+  | "SILENT_STEALTH_CALCULATOR";
 
 interface QueuedLocation {
   lat: number;
@@ -265,7 +268,7 @@ export default function App() {
 
     requestHardwareCapabilities();
 
-    // Re-verify GPS and Mic when app returns from background / Settings toggle
+    // Maintain continuous background tracking & re-verify hardware on foreground
     const sub = AppState.addEventListener(
       "change",
       async (nextState: AppStateStatus) => {
@@ -279,6 +282,12 @@ export default function App() {
             setCoords({ lat: freshFix.lat, lng: freshFix.lng });
             if (freshFix.accuracy) setLocationAccuracy(freshFix.accuracy);
           }
+          twoTierDistressPipeline.startPipeline();
+        } else if (nextState === "background" || nextState === "inactive") {
+          logger.info(
+            "[Guardian] 📱 App running in background / home screen. Ensuring continuous audio spotter & location telemetry remain active.",
+          );
+          // Keep audio spotter alive in background
           twoTierDistressPipeline.startPipeline();
         }
       },
@@ -327,6 +336,7 @@ export default function App() {
   }, []);
 
   const [resolutionNotice, setResolutionNotice] = useState<string | null>(null);
+  const [showCancelModal, setShowCancelModal] = useState<boolean>(false);
 
   // Synchronize ref states
   useEffect(() => {
@@ -358,7 +368,57 @@ export default function App() {
     setDeadmanSeconds(null);
     setLastGaspSent(false);
     setShutdownLastGaspNotice(null);
+    setShowCancelModal(false);
     hardwareAudioVaultService.reset();
+  };
+
+  const handlePromptCancelSos = () => {
+    setShowCancelModal(true);
+  };
+
+  const handleResolveSos = async (status: "RESOLVED" | "FALSE_ALARM") => {
+    setShowCancelModal(false);
+    const targetIncId = incidentIdRef.current || incidentId;
+
+    if (targetIncId) {
+      // 1. Emit status change over Socket.IO
+      if (socketRef.current?.connected) {
+        socketRef.current.emit("responder:status_change", {
+          incidentId: targetIncId,
+          status,
+        });
+        socketRef.current.emit("incident:status_change", {
+          incidentId: targetIncId,
+          status,
+        });
+      }
+
+      // 2. Transmit PATCH update to REST backend
+      try {
+        await fetch(`${backendUrl}/api/incidents/${targetIncId}/status`, {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+            ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+          },
+          body: JSON.stringify({ status }),
+        });
+      } catch (err: any) {
+        console.warn("[Guardian SOS Cancel] REST status sync error:", err?.message);
+      }
+    }
+
+    // 3. Reset local mobile state
+    cancelDistress();
+    try {
+      Vibration.vibrate([0, 80, 80, 80]);
+    } catch {}
+    const noticeText =
+      status === "RESOLVED"
+        ? `🛡️ Emergency SOS #${targetIncId || "Active"} safely marked RESOLVED.`
+        : `⚠️ Emergency SOS #${targetIncId || "Active"} marked as FALSE ALARM.`;
+    setResolutionNotice(noticeText);
+    setTimeout(() => setResolutionNotice(null), 8000);
   };
 
   // Handle Interactive Voice Calibration Recorder
@@ -807,6 +867,14 @@ export default function App() {
     setResponderStatus("ALERTING_DISPATCH");
     setLastGaspSent(false);
 
+    try {
+      if (type === "SILENT_STEALTH_CALCULATOR") {
+        Vibration.vibrate(60); // Subtle, silent haptic tick
+      } else {
+        Vibration.vibrate([0, 400, 200, 400]); // Noticeable distress pattern
+      }
+    } catch {}
+
     // If coordinates are null or 0, force refresh GPS fix before sending payload
     let targetCoords = coordsRef.current;
     if (!targetCoords || (targetCoords.lat === 0 && targetCoords.lng === 0)) {
@@ -891,13 +959,22 @@ export default function App() {
   };
 
   // Stealth Calculator Decoy Logic
+  const [calculatorTriggerNotice, setCalculatorTriggerNotice] = useState<string | null>(null);
+
   const handleCalcPress = (btn: string) => {
     if (btn === "C") {
       setCalculatorInput("0");
       return;
     }
     if (btn === "=") {
-      if (calculatorInput === "9999") {
+      if (calculatorInput === "1122") {
+        // Silent SOS Trigger from Stealth Calculator
+        triggerDistress("SILENT_STEALTH_CALCULATOR");
+        setCalculatorInput("0");
+        setCalculatorTriggerNotice("🛡️ Silent SOS Transmitted");
+        setTimeout(() => setCalculatorTriggerNotice(null), 3500);
+      } else if (calculatorInput === "9999") {
+        // Exit Stealth Decoy Mode
         setIsStealthMode(false);
         setCalculatorInput("0");
       } else {
@@ -1009,8 +1086,33 @@ export default function App() {
             </TouchableOpacity>
           ))}
         </View>
+        {calculatorTriggerNotice && (
+          <View
+            style={{
+              paddingVertical: 6,
+              paddingHorizontal: 12,
+              backgroundColor: "rgba(16, 185, 129, 0.2)",
+              borderRadius: 6,
+              alignSelf: "center",
+              marginBottom: 8,
+              borderWidth: 1,
+              borderColor: "rgba(16, 185, 129, 0.4)",
+            }}
+          >
+            <Text
+              style={{
+                color: "#34d399",
+                fontSize: 12,
+                fontWeight: "700",
+                textAlign: "center",
+              }}
+            >
+              {calculatorTriggerNotice}
+            </Text>
+          </View>
+        )}
         <Text style={styles.calcHint}>
-          Enter PIN 9999 and press = to return
+          Decoy Mode • Enter 1122= for Silent SOS • 9999= to return
         </Text>
       </SafeAreaView>
     );
@@ -1215,13 +1317,13 @@ export default function App() {
             style={[styles.sosButton, isSosActive && styles.sosButtonActive]}
             activeOpacity={0.75}
             onPress={() =>
-              isSosActive ? cancelDistress() : triggerDistress("MANUAL_SOS")
+              isSosActive ? handlePromptCancelSos() : triggerDistress("MANUAL_SOS")
             }
             hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
           >
             <Text style={styles.sosText}>{isSosActive ? "CANCEL" : "SOS"}</Text>
             <Text style={styles.sosSubtext}>
-              {isSosActive ? "Tap to Disarm" : "Tap for Emergency"}
+              {isSosActive ? "Tap to Disarm / Resolve" : "Tap for Emergency"}
             </Text>
           </TouchableOpacity>
         </View>
@@ -1399,6 +1501,44 @@ export default function App() {
                 </Text>
               </View>
             </View>
+
+            {pipelineTelemetry.liveBiometricScore !== undefined && (
+              <View style={[styles.telemetryMiniBox, { marginTop: 6 }]}>
+                <View style={styles.rowBetween}>
+                  <Text style={{ fontSize: 10, color: "#94a3b8" }}>
+                    Live Voice Similarity:
+                  </Text>
+                  <Text
+                    style={{
+                      fontSize: 10,
+                      fontWeight: "700",
+                      color:
+                        pipelineTelemetry.liveBiometricScore >=
+                        speakerBiometricsService.getMatchThreshold() * 100
+                          ? "#34d399"
+                          : "#cbd5e1",
+                    }}
+                  >
+                    {pipelineTelemetry.liveBiometricScore.toFixed(0)}% Match
+                  </Text>
+                </View>
+                <View style={[styles.meterTrack, { marginTop: 4 }]}>
+                  <View
+                    style={[
+                      styles.meterFill,
+                      {
+                        width: `${Math.min(100, Math.max(0, pipelineTelemetry.liveBiometricScore))}%`,
+                        backgroundColor:
+                          pipelineTelemetry.liveBiometricScore >=
+                          speakerBiometricsService.getMatchThreshold() * 100
+                            ? "#34d399"
+                            : "#a855f7",
+                      },
+                    ]}
+                  />
+                </View>
+              </View>
+            )}
 
             {pipelineTelemetry.speakerBiometrics && (
               <View style={styles.telemetryMiniBox}>
@@ -2236,6 +2376,49 @@ export default function App() {
           </View>
         </View>
       </ScrollView>
+
+      {/* Disarm / Cancel SOS Confirmation Modal */}
+      <Modal
+        visible={showCancelModal}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setShowCancelModal(false)}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>🛡️ Disarm Emergency SOS</Text>
+            <Text style={styles.modalDescription}>
+              Please select the resolution status to transmit to emergency responders and dispatch:
+            </Text>
+
+            <TouchableOpacity
+              style={[styles.modalActionBtn, styles.modalBtnResolve]}
+              onPress={() => handleResolveSos("RESOLVED")}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.modalBtnResolveText}>✅ Resolve Emergency (RESOLVED)</Text>
+              <Text style={styles.modalBtnSubtext}>I am safe now • Emergency is resolved</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.modalActionBtn, styles.modalBtnFalseAlarm]}
+              onPress={() => handleResolveSos("FALSE_ALARM")}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.modalBtnFalseAlarmText}>⚠️ Mark as False Alarm (FALSE ALARM)</Text>
+              <Text style={styles.modalBtnSubtext}>Accidental trigger or testing</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.modalCancelBtn}
+              onPress={() => setShowCancelModal(false)}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.modalCancelBtnText}>Keep Emergency SOS Active</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -2975,5 +3158,83 @@ const styles = StyleSheet.create({
     color: "#38bdf8",
     fontSize: 11,
     fontWeight: "600",
+  },
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(0, 0, 0, 0.75)",
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 20,
+  },
+  modalContent: {
+    width: "100%",
+    maxWidth: 440,
+    backgroundColor: "#111827",
+    borderRadius: 18,
+    padding: 20,
+    borderWidth: 1.5,
+    borderColor: "rgba(239, 68, 68, 0.4)",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.8,
+    shadowRadius: 24,
+    elevation: 20,
+  },
+  modalTitle: {
+    color: "#f8fafc",
+    fontSize: 18,
+    fontWeight: "800",
+    marginBottom: 6,
+    textAlign: "center",
+  },
+  modalDescription: {
+    color: "#94a3b8",
+    fontSize: 12,
+    lineHeight: 16,
+    textAlign: "center",
+    marginBottom: 16,
+  },
+  modalActionBtn: {
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    marginBottom: 10,
+    alignItems: "center",
+  },
+  modalBtnResolve: {
+    backgroundColor: "rgba(16, 185, 129, 0.2)",
+    borderWidth: 1.5,
+    borderColor: "#10b981",
+  },
+  modalBtnResolveText: {
+    color: "#34d399",
+    fontSize: 14,
+    fontWeight: "800",
+  },
+  modalBtnFalseAlarm: {
+    backgroundColor: "rgba(245, 158, 11, 0.18)",
+    borderWidth: 1.5,
+    borderColor: "#f59e0b",
+  },
+  modalBtnFalseAlarmText: {
+    color: "#fbbf24",
+    fontSize: 14,
+    fontWeight: "800",
+  },
+  modalBtnSubtext: {
+    color: "#94a3b8",
+    fontSize: 11,
+    marginTop: 2,
+    fontWeight: "500",
+  },
+  modalCancelBtn: {
+    paddingVertical: 10,
+    alignItems: "center",
+    marginTop: 4,
+  },
+  modalCancelBtnText: {
+    color: "#64748b",
+    fontSize: 13,
+    fontWeight: "700",
   },
 });

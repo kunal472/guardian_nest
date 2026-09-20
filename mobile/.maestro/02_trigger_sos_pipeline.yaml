@@ -1,0 +1,29 @@
+appId: com.anonymous.guardianmobile
+---
+# Flow 2: Trigger SOS Emergency Distress Pipeline & Validate Live Telemetry
+- launchApp
+
+# 1. Ensure Dashboard is Active
+- assertVisible: "HOLD 3S FOR EMERGENCY SOS"
+
+# 2. Trigger Panic SOS via Long Press
+- longPressOn:
+    text: "HOLD 3S FOR EMERGENCY SOS"
+    duration: 3500
+
+# 3. Assert Active Emergency Distress UI
+- assertVisible: "EMERGENCY SOS ACTIVE"
+- assertVisible: "BROADCASTING LIVE TELEMETRY"
+
+# 4. Validate Dynamic 1-Second GPS and Battery Telemetry
+- assertVisible: "GPS Stream Active"
+- assertVisible: "Audio Vault Encrypted"
+
+# 5. Cancel / Resolve SOS
+- tapOn: "CANCEL SOS"
+- assertVisible: "Enter Duress PIN or Safety Code"
+- inputText: "1234"
+- tapOn: "Confirm Resolution"
+
+# 6. Verify Return to Standby State
+- assertVisible: "SYSTEM READY"

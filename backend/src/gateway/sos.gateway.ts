@@ -229,23 +229,36 @@ export class SosGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   @SubscribeMessage('responder:status_change')
+  @SubscribeMessage('incident:status_change')
+  @SubscribeMessage('distress:cancelled')
+  @SubscribeMessage('distress:resolve')
   async handleResponderStatusChange(
     @ConnectedSocket() client: Socket,
-    @MessageBody() data: ResponderStatusPayload,
+    @MessageBody() data: any,
   ) {
     try {
-      const responderId = client.data.user?.sub || client.data.user?.id || data.responderId;
+      const incidentId = data.incidentId || data.id;
+      const status: IncidentStatus = data.status || 'RESOLVED';
+      const actorId = client.data.user?.sub || client.data.user?.id || data.responderId || data.userId;
+
+      if (!incidentId) {
+        return { success: false, message: 'Missing incidentId' };
+      }
+
+      this.logger.log(`[STATUS TRANSITION] Incident #${incidentId} updated to ${status} by user ${actorId || 'Mobile Citizen'}`);
+
       const updated = await this.incidentsService.updateStatus(
-        data.incidentId,
-        data.status,
-        responderId,
+        incidentId,
+        status,
+        actorId,
       );
 
-      this.broadcastStatusChange(data.incidentId, data.status, responderId, updated, data.estimatedArrivalMins);
+      this.broadcastStatusChange(incidentId, status, actorId, updated, data.estimatedArrivalMins);
 
       return { success: true, incident: updated };
     } catch (err: any) {
-      this.logger.error(`Error in responder:status_change: ${err.message}`);
+      this.logger.error(`Error in status change handling: ${err.message}`);
+      return { success: false, message: err.message };
     }
   }
 

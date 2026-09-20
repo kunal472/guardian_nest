@@ -1,64 +1,90 @@
 # Project Guardian: Technical Architecture
 
-This document breaks down the Event-Driven Architecture (EDA) into concrete infrastructure, backend languages, and protocol choices so developers can build the platform accurately.
+This document specifies the Event-Driven Architecture (EDA), infrastructure layers, backend frameworks, protocol choices, and client subsystems so developers can understand and maintain the platform accurately.
 
 ---
 
 ## 1. Core Infrastructure & Stack Choices
 
-To guarantee extreme resilience and low latency, we are utilizing the following technology stack:
+To guarantee extreme resilience, low latency, and zero-touch responsiveness during emergencies, Project Guardian utilizes the following technology stack:
 
-- **Backend Framework**: Node.js with Express (REST) and Apollo Server (GraphQL). Node.js is chosen for its superior handling of asynchronous I/O and persistent WebSocket connections.
-- **Real-time Gateway**: Socket.io. It provides automatic fallback to long-polling if WebSockets fail, which is critical for unstable mobile connections.
-- **Message Broker / Event Bus**: Redis (Pub/Sub & Redis Streams). Chosen over Kafka for its simplicity and blazing-fast in-memory geospatial (`GEO`) querying capabilities.
-- **Primary Database**: PostgreSQL. Handles all structured relational data (Users, incident logs).
-- **Object Storage**: AWS S3. For storing encrypted audio evidence and media.
-- **Hosting / Deployment**: Dockerized containers deployed on AWS ECS or Google Cloud Run to allow rapid horizontal scaling during mass emergencies.
+- **Backend Framework**: **NestJS (v11)** using the high-performance **Fastify Adapter** (`@nestjs/platform-fastify`). NestJS provides modular dependency injection, structured controllers, and robust lifecycle hooks, while Fastify delivers ultra-fast request processing.
+- **Dual API Architecture**:
+  - **REST API (Fastify Controllers)**: Stateless, synchronous endpoints for auth, profile management, volunteer controls, incident lifecycle management, and evidence uploads.
+  - **GraphQL Server (Apollo Server on Fastify)**: Single `/graphql` endpoint serving complex nested analytical queries and mutations for the Admin Dashboard.
+- **Real-time Event Gateway**: **Socket.IO** (`@nestjs/platform-socket.io` / `socket.io-client`). Provides bidirectional event streams with automatic reconnection and fallback for unstable mobile networks.
+- **Message Broker & Geospatial Cache**: **Redis 7** (using `ioredis`). Handles in-memory session mapping, active incident states, and sub-millisecond geospatial radius queries (`GEOADD` and `GEOSEARCH`).
+- **Primary Database**: **PostgreSQL 15** with **Prisma ORM 7** (`@prisma/client` & `@prisma/adapter-pg`). Houses relational data including users, emergency contacts, incidents, and throttled location logs.
+- **Evidence Storage & Audio Vault**: Local file streams (`/uploads/evidence`) and encrypted AWS S3 object storage with pre-signed URL generation.
+- **Containerization**: Docker & Docker Compose (`docker-compose.yml`) orchestrating PostgreSQL and Redis instances.
 
 ---
 
-## 2. Hybrid Approach: Event Bus vs. REST API
+## 2. Hybrid Approach: Event Bus vs. Synchronous APIs
 
-We do not use WebSockets for everything. Developers must adhere to this split:
+We maintain a strict separation of concerns across communication protocols:
 
-- **REST API (Express.js)**: Used exclusively for stateless, synchronous operations where the client needs an immediate database response. 
-  - *Examples*: `/api/auth/login`, `/api/users/me`.
-  - *Tech*: Handled via standard HTTPS GET/POST requests.
-- **GraphQL (Apollo Server)**: Used exclusively by the Admin Dashboard SPA to query complex, nested PostgreSQL data without over-fetching.
-- **Event Bus (Redis + Socket.io)**: Used for high-velocity, mission-critical emergency data.
-  - *Examples*: SOS triggers, live location streaming.
-  - *Tech*: Handled over long-lived WSS (WebSocket Secure) connections.
+```
+                               ┌──────────────────────────────────────────────┐
+                               │                Clients Layer                 │
+                               │  - Mobile Edge (React Native / Expo SDK 57)  │
+                               │  - Responder Dashboard (React 19 + Leaflet)  │
+                               │  - Admin Dashboard (React 19 + GraphQL)      │
+                               └──────┬──────────────────────┬──────────────┬─┘
+                                      │                      │              │
+                                 REST │             Socket.io│              │ GraphQL
+                                      ▼                      ▼              ▼
+                               ┌──────────────────────────────────────────────┐
+                               │       NestJS Backend (Fastify Adapter)       │
+                               │ ├── REST Controllers (/api/auth, incidents)  │
+                               │ ├── Apollo GraphQL Module (/graphql)         │
+                               │ └── SosGateway (distress, location updates)  │
+                               └──────────────┬───────────────────────────────┘
+                                              │
+                             ┌────────────────┴────────────────┐
+                             ▼                                 ▼
+              ┌─────────────────────────────┐   ┌─────────────────────────────┐
+              │ PostgreSQL Database (Prisma)│   │ Redis (Geo Index & Session) │
+              └─────────────────────────────┘   └─────────────────────────────┘
+```
+
+- **REST API (`/api/*`)**: Used for synchronous operations where the client requires deterministic database records (user registration, login, profile updates, volunteer toggle, and multipart/base64 encrypted audio evidence uploads).
+- **GraphQL (`/graphql`)**: Used exclusively by the Admin Intelligence Dashboard to query multi-relational graphs (incidents joined with users, responders, and location breadcrumbs) in a single round-trip.
+- **Event Bus (`SosGateway` on Socket.io)**: Dedicated to mission-critical, high-velocity emergency telemetry (distress triggers, dynamic live GPS location updates, sentinel proximity broadcasts, and responder status transitions).
 
 ---
 
 ## 3. The Event-Driven Data Flow (By Client)
 
-### A. User Interface (Mobile & Web Edge Client)
-Built using **React Native (Expo)** and **React.js**.
+### A. Mobile Edge Client (`/mobile`)
+Built with **React Native (v0.86.3)** and **Expo (SDK ~57)** with custom native modules:
 
-- **Edge Intelligence**: The app uses TensorFlow.js (or native MLKit) to process microphone buffers locally. Audio NEVER leaves the device for ML analysis.
-- **Publishing Events**: 
-  - If a scream is detected, the app emits a `distress:triggered` socket event to the Node.js server. 
-  - It then runs a `setInterval` to emit `location:update` events every 3 seconds.
-- **Subscribing to Events**: 
-  - If in Volunteer Mode, the app listens to the Socket.io namespace for `nearby:broadcast` events to render victims on their Mapbox UI.
-
-### B. Emergency Responder Dashboard (Web Portal)
-Built using **React.js (Vite)**.
-
-- **Subscribing to Events**:
-  - Maintains a persistent WebSocket connection. It joins a Socket.io "room" based on its geographic jurisdiction (e.g., `room:jurisdiction_nyc`).
-  - Receives `distress:triggered` events and plots them instantly on the Leaflet/Mapbox canvas.
+- **Local Edge Intelligence**:
+  - **Two-Tier Distress Pipeline**: Combines continuous lightweight DBFS noise floor metering, keyword spotting (`openWakeWord`), acoustic classification (`YAMNet` / Whisper.cpp), and speaker biometrics.
+  - **Acoustic Vault & Native Module (`guardian-audio`)**: C++/JNI native audio coordinator buffering raw PCM audio into an encrypted hardware vault. Audio analysis happens on-device; raw audio never leaves unless an active SOS is triggered.
+  - **Hardware Snatch Detection**: Uses accelerometer sensors (`expo-sensors` / hardware snatch service) to detect abrupt physical removal signatures.
 - **Publishing Events**:
-  - Dispatchers click "Dispatch Unit," which emits a `responder:status_change` event. The Node.js server routes this through Redis back to the specific victim's mobile device.
+  - Emits `distress:triggered` with GPS coordinates, trigger type, and battery telemetry when SOS conditions are met.
+  - Emits `location:update` continuously, applying dynamic battery throttling (1 ping/sec in SOS mode, 1 ping/10sec in standby).
+- **Subscribing to Events**:
+  - Subscribes to `nearby:broadcast` to alert the user if they are an active volunteer sentinel within 500m of an emergency.
+  - Subscribes to `events.responder.status_change` to receive live dispatch notifications and estimated arrival times.
 
-### C. Admin Dashboard (Web Interface)
-Built using **React.js**.
+### B. Emergency Responder Tactical Dashboard (`/dashboards/responder_dashboard`)
+Built with **React 19**, **Vite 8**, and **Leaflet Maps**:
 
-- **Asynchronous DB Logging**:
-  - A dedicated background Node.js worker (the "Admin Logger Service") subscribes to ALL Redis event streams. 
-  - Instead of blocking the live Socket.io gateway, this background worker safely batches location updates and writes them into the PostgreSQL `incident_location_logs` table every 10 seconds.
-- **Data Consumption**:
-  - Admins view these logs not through sockets, but by executing GraphQL queries against the PostgreSQL database.
-- **Publishing Configuration**:
-  - Admins can emit `system:config_update` events (like tuning the ML sensitivity weight) which the Node.js server broadcasts globally to all connected Edge Clients.
+- **Real-Time Map & Breadcrumbs**:
+  - Maintains persistent WebSocket connection and joins `room:responders`.
+  - Automatically receives `nearby:broadcast` and `incident:new` events, rendering interactive radar pins and live GPS breadcrumb trails.
+- **Status Dispatch Actions**:
+  - Responders update incident progress by emitting `responder:status_change` (`DISPATCHED`, `ARRIVED`, `RESOLVED`), which updates the backend database and notifies the victim in real-time.
+- **Audio Evidence Review**:
+  - Fetches and plays back uploaded audio evidence and encrypted vaults associated with incidents.
+
+### C. Admin Intelligence Dashboard (`/dashboards/admin_dashboard`)
+Built with **React 19**, **Vite 8**, and **Apollo GraphQL**:
+
+- **Analytical Queries**:
+  - Queries `/graphql` to fetch aggregate incident reports, volunteer density metrics, and user management tables without over-fetching.
+- **System Tuning**:
+  - Emits `system:config_update` over WebSockets to dynamically adjust ML detection sensitivity thresholds across active mobile clients.

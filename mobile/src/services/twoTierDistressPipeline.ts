@@ -31,6 +31,8 @@ export interface PipelineTelemetry {
   distressIntent: string | null;
   verificationLatencyMs: number;
   speakerBiometrics: VerificationResult | null;
+  liveBiometricScore?: number; // 0 - 100%
+  ambientNoiseDbfs?: number; // Ambient background noise floor
   ringBufferFill: number; // 0 - 100%
   ringBufferSeconds: number; // 0.0 - 5.0s
   liveAudioEnergyPercent: number; // 0 - 100% live microphone amplitude
@@ -73,6 +75,8 @@ class TwoTierDistressPipeline {
   private isTriggerDebounced: boolean = false;
   private sustainedHighEnergyFrames: number = 0;
   private liveMeteringDbfs: number | null = null;
+  private ambientNoiseFloorDbfs: number = -55.0;
+  private calibrationFramesCount: number = 0;
   private lastVocalBurstTime: number = 0;
   private vocalBurstCount: number = 0;
   private inAcousticValley: boolean = true;
@@ -88,6 +92,8 @@ class TwoTierDistressPipeline {
     distressIntent: null,
     verificationLatencyMs: 0,
     speakerBiometrics: null,
+    liveBiometricScore: 85,
+    ambientNoiseDbfs: -55.0,
     ringBufferFill: 0,
     ringBufferSeconds: 0,
     liveAudioEnergyPercent: 8,
@@ -194,13 +200,24 @@ class TwoTierDistressPipeline {
       const liveMeteringDbfs: number | null = this.liveMeteringDbfs;
       const now = Date.now();
 
+      // Continuous ambient noise calibration (moving average during non-speech quiet frames)
+      if (liveMeteringDbfs !== null) {
+        if (this.calibrationFramesCount < 20) {
+          this.calibrationFramesCount++;
+          this.ambientNoiseFloorDbfs = this.ambientNoiseFloorDbfs * 0.8 + liveMeteringDbfs * 0.2;
+        } else if (liveMeteringDbfs < -30.0) {
+          this.ambientNoiseFloorDbfs = this.ambientNoiseFloorDbfs * 0.95 + liveMeteringDbfs * 0.05;
+        }
+      }
+
+      // Dynamic adaptive thresholds based on ambient room noise (supports whispers down to -38 dBFS in quiet rooms)
+      const speechFloorDbfs = Math.min(-20.0, Math.max(-38.0, this.ambientNoiseFloorDbfs + 6.0));
+      const screamFloorDbfs = Math.min(-14.0, Math.max(-18.0, speechFloorDbfs + 8.0));
+
       // Calculate live energy percentage (0 to 100%) from dBFS (-60 to 0)
       const liveEnergyPercent = liveMeteringDbfs !== null
         ? Math.min(100, Math.max(3, Math.round(((liveMeteringDbfs + 60) / 60) * 100)))
         : Math.round(5 + Math.random() * 8);
-
-      const screamFloorDbfs = -18.0;
-      const speechFloorDbfs = -26.0;
 
       // Track continuous high amplitude for Scream Detector
       if (liveMeteringDbfs !== null && liveMeteringDbfs >= screamFloorDbfs) {
@@ -223,7 +240,7 @@ class TwoTierDistressPipeline {
           // Acoustic valley (short pause between spoken syllables)
           this.inAcousticValley = true;
         } else if (liveMeteringDbfs >= speechFloorDbfs && liveMeteringDbfs < screamFloorDbfs) {
-          // Spoken speech vocal energy band (-26 dBFS to -18 dBFS)
+          // Spoken speech vocal energy band (dynamically calibrated)
           if (this.inAcousticValley) {
             this.inAcousticValley = false;
             const timeSinceLastBurst = now - this.lastVocalBurstTime;
@@ -258,6 +275,7 @@ class TwoTierDistressPipeline {
       this.telemetry.ringBufferSeconds = this.ringBuffer.getBufferedSeconds();
       this.telemetry.liveAudioEnergyPercent = liveEnergyPercent;
       this.telemetry.liveDbfs = liveMeteringDbfs ?? -55.0;
+      this.telemetry.ambientNoiseDbfs = Number(this.ambientNoiseFloorDbfs.toFixed(1));
       this.emitState();
 
       // Tier 1 Trigger A: Real-Time Acoustic Scream Spotter (>= 2 consecutive 100ms frames >= -18.0 dBFS)
@@ -416,12 +434,17 @@ class TwoTierDistressPipeline {
     const embedding = speakerBiometricsService.extractEmbedding(audioContext);
     const bioResult = speakerBiometricsService.verifySpeaker(embedding);
 
+    const matchPercent = Math.round(bioResult.similarity * 100);
     this.telemetry.speakerBiometrics = bioResult;
+    this.telemetry.liveBiometricScore = matchPercent;
     this.emitState();
 
-    if (!bioResult.isMatch) {
+    // Confidence Product Scoring: allows whispered/quiet distress when keyword match is high (confidence >= 0.80 and similarity >= 0.55)
+    const isPassing = bioResult.isMatch || (confidence >= 0.80 && bioResult.similarity >= 0.55);
+
+    if (!isPassing) {
       // Rejected as bystander voice
-      logger.biometrics(`[TwoTierPipeline] ⚠️ Bystander cadence rejected (${(bioResult.similarity * 100).toFixed(1)}% < ${(bioResult.threshold * 100).toFixed(0)}%)`);
+      logger.biometrics(`[TwoTierPipeline] ⚠️ Bystander cadence rejected (${matchPercent}% < ${(bioResult.threshold * 100).toFixed(0)}%)`);
       this.telemetry.tier2Status = 'rejected';
       this.emitState();
       setTimeout(() => {

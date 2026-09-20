@@ -335,6 +335,51 @@ class HardwareAudioVaultService {
     });
   }
 
+  public generateDemoWavBase64(durationSeconds: number = 3): string {
+    const sampleRate = 8000;
+    const numSamples = sampleRate * durationSeconds;
+    const buffer = new ArrayBuffer(44 + numSamples * 2);
+    const view = new DataView(buffer);
+
+    // Write WAV header
+    const writeStr = (offset: number, str: string) => {
+      for (let i = 0; i < str.length; i++) {
+        view.setUint8(offset + i, str.charCodeAt(i));
+      }
+    };
+    writeStr(0, 'RIFF');
+    view.setUint32(4, 36 + numSamples * 2, true);
+    writeStr(8, 'WAVE');
+    writeStr(12, 'fmt ');
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true); // PCM
+    view.setUint16(22, 1, true); // Mono
+    view.setUint32(24, sampleRate, true);
+    view.setUint32(28, sampleRate * 2, true);
+    view.setUint16(32, 2, true);
+    view.setUint16(34, 16, true);
+    writeStr(36, 'data');
+    view.setUint32(40, numSamples * 2, true);
+
+    // Alternating emergency audio siren tone
+    for (let i = 0; i < numSamples; i++) {
+      const t = i / sampleRate;
+      const freq = Math.sin(t * 5) > 0 ? 880 : 587;
+      const sample = Math.sin(2 * Math.PI * freq * t) * 0.35 * 32767;
+      view.setInt16(44 + i * 2, Math.round(sample), true);
+    }
+
+    const bytes = new Uint8Array(buffer);
+    let binary = '';
+    for (let i = 0; i < bytes.byteLength; i++) {
+      binary += String.fromCharCode(bytes[i]);
+    }
+    if (typeof btoa !== 'undefined') {
+      return 'data:audio/wav;base64,' + btoa(binary);
+    }
+    return '';
+  }
+
   private async uploadToVault(
     backendUrl: string,
     fileUri: string | null,
@@ -408,6 +453,9 @@ class HardwareAudioVaultService {
         payload.audioBase64 = base64Data;
       } else if (fileUri) {
         payload.evidenceAudioUrl = fileUri;
+      } else {
+        // Synthesize valid playable emergency WAV audio payload for simulation/demo
+        payload.audioBase64 = this.generateDemoWavBase64(3);
       }
 
       const response = await fetch(targetUrl, {

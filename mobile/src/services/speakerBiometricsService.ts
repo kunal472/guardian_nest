@@ -89,6 +89,22 @@ class SpeakerBiometricsService {
     );
   }
 
+  public resetProfile(): void {
+    this.activeProfile = {
+      userId: "owner_primary",
+      userName: "Primary Device Owner",
+      enrolledAt: new Date().toISOString(),
+      embeddingVector: [
+        0.38, 0.42, 0.55, 0.29, 0.61, 0.48, 0.35, 0.52, 0.44, 0.39, 0.58,
+        0.41, 0.49, 0.53, 0.37, 0.46,
+      ],
+      samplesCount: 3,
+    };
+    this.collectedSamples = [];
+    this.matchThreshold = 0.72;
+    this.notifyProfileChanged();
+  }
+
   public setMatchThreshold(threshold: number): void {
     this.matchThreshold = Math.max(0.4, Math.min(0.95, threshold));
   }

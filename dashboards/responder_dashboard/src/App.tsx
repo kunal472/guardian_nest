@@ -12,6 +12,8 @@ import {
   Users,
   Wifi,
   WifiOff,
+  Volume2,
+  VolumeX,
 } from 'lucide-react';
 import {
   Incident,
@@ -30,6 +32,7 @@ import {
   ResponderUser,
 } from './services/auth';
 import { logger } from './services/logger';
+import { audioChime } from './services/audioChime';
 
 export const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<ResponderUser | null>(() => {
@@ -53,6 +56,7 @@ export const App: React.FC = () => {
   >([]);
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
   const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [isAudioMuted, setIsAudioMuted] = useState<boolean>(() => audioChime.getMuted());
 
   // Initialize Data when token is available
   useEffect(() => {
@@ -91,11 +95,13 @@ export const App: React.FC = () => {
     // Listen for new distress triggers
     socket.on('nearby:broadcast', (alert: any) => {
       logger.socket('🚨 New Distress Alert broadcast received via Socket.io:', alert);
+      audioChime.playEmergencyDispatchAlert();
       loadIncidents();
     });
 
     socket.on('incident:new', (newInc: Incident) => {
       logger.socket(`🚨 New Incident received #${newInc.id} (${newInc.triggerType})`);
+      audioChime.playEmergencyDispatchAlert();
       setIncidents((prev) => [newInc, ...prev.filter((i) => i.id !== newInc.id)]);
       setSelectedIncident(newInc);
     });
@@ -184,17 +190,29 @@ export const App: React.FC = () => {
 
     const updated = await updateIncidentStatus(selectedIncident.id, newStatus, token);
     if (updated) {
+      if (newStatus === 'RESOLVED' || newStatus === 'FALSE_ALARM') {
+        audioChime.playAcknowledgePing();
+      }
       setSelectedIncident(updated);
       setIncidents((prev) => prev.map((i) => (i.id === updated.id ? updated : i)));
     }
     setIsLoading(false);
   };
 
-  // Mock Distress Trigger to simulate live SOS signal
+  // Mock Distress Trigger to simulate live SOS signal near active area
   const simulateLiveDistress = () => {
     const socket = getSocket(token);
-    const mockLat = 40.7128 + (Math.random() - 0.5) * 0.01;
-    const mockLng = -74.006 + (Math.random() - 0.5) * 0.01;
+    const baseLat =
+      liveCoordinates?.lat ??
+      selectedIncident?.locationLogs?.[selectedIncident.locationLogs.length - 1]?.lat ??
+      18.5204;
+    const baseLng =
+      liveCoordinates?.lng ??
+      selectedIncident?.locationLogs?.[selectedIncident.locationLogs.length - 1]?.lng ??
+      73.8567;
+
+    const mockLat = baseLat + (Math.random() - 0.5) * 0.005;
+    const mockLng = baseLng + (Math.random() - 0.5) * 0.005;
 
     socket.emit('distress:triggered', {
       lat: mockLat,
@@ -311,18 +329,45 @@ export const App: React.FC = () => {
               display: 'flex',
               alignItems: 'center',
               gap: '6px',
-              padding: '6px 14px',
+              padding: '6px 12px',
               borderRadius: '20px',
-              background: isConnected ? 'rgba(16, 185, 129, 0.15)' : 'rgba(239, 68, 68, 0.15)',
-              border: isConnected ? '1px solid #10b981' : '1px solid #ef4444',
-              color: isConnected ? '#34d399' : '#f87171',
+              background: isConnected ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)',
+              border: `1px solid ${isConnected ? 'rgba(16, 185, 129, 0.3)' : 'rgba(239, 68, 68, 0.3)'}`,
               fontSize: '12px',
               fontWeight: '600',
+              color: isConnected ? 'var(--accent-green)' : 'var(--accent-red)',
             }}
           >
             {isConnected ? <Wifi size={14} /> : <WifiOff size={14} />}
             <span>{isConnected ? 'Event Bus Connected' : 'Connecting to Gateway...'}</span>
           </div>
+
+          {/* Audio Chime Mute/Unmute Toggle */}
+          <button
+            onClick={() => {
+              const nextMute = !isAudioMuted;
+              setIsAudioMuted(nextMute);
+              audioChime.setMuted(nextMute);
+            }}
+            title={isAudioMuted ? 'Unmute Dispatch Siren Chimes' : 'Mute Dispatch Siren Chimes'}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '7px 12px',
+              borderRadius: '8px',
+              background: isAudioMuted ? 'rgba(239, 68, 68, 0.15)' : 'rgba(56, 189, 248, 0.15)',
+              border: `1px solid ${isAudioMuted ? '#ef4444' : '#38bdf8'}`,
+              color: isAudioMuted ? '#f87171' : '#38bdf8',
+              fontSize: '12px',
+              fontWeight: '700',
+              cursor: 'pointer',
+              transition: 'all 0.2s ease',
+            }}
+          >
+            {isAudioMuted ? <VolumeX size={15} /> : <Volume2 size={15} />}
+            <span>{isAudioMuted ? 'Siren Muted' : 'Siren Active'}</span>
+          </button>
 
           <button
             onClick={simulateLiveDistress}

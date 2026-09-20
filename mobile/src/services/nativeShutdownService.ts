@@ -83,9 +83,8 @@ class NativeShutdownService {
 
   private handleAppStateChange = (nextState: AppStateStatus): void => {
     if (nextState === 'inactive' || nextState === 'background') {
-      if (this.activeIncidentId) {
-        this.dispatchPreShutdownBeacon('APP_STATE_BACKGROUND_SUSPEND');
-      }
+      // In background/home screen: keep sensors and background SOS active
+      console.log('[NativeShutdownService] 📱 App transitioning to background/home screen. Keeping background sentinel active.');
     }
   };
 
@@ -97,9 +96,7 @@ class NativeShutdownService {
 
   private handleVisibilityChange = (): void => {
     if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
-      if (this.activeIncidentId) {
-        this.dispatchPreShutdownBeacon('DOCUMENT_VISIBILITY_HIDDEN');
-      }
+      console.log('[NativeShutdownService] Web visibility hidden. Maintaining background task.');
     }
   };
 

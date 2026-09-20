@@ -1,182 +1,286 @@
 # Project Guardian: API & Event Bus Design
 
-Since our architecture uses a hybrid approach, we must carefully design both the traditional API (for standard CRUD operations) and the Event Bus (for real-time emergencies).
+Since our architecture uses a hybrid approach, we define both the synchronous REST & GraphQL APIs (for deterministic CRUD & analytical queries) and the real-time Event Bus (for mission-critical emergency telemetry).
 
 ---
 
-## Part 1: REST vs. GraphQL for the Standard API
+## Part 1: Architecture Overview ("One Backend, Two Doors")
 
-When building the standard synchronous API for Project Guardian, we must choose between REST and GraphQL. 
+Project Guardian utilizes a **Dual-API & WebSocket Event Bus** running on a single **NestJS 11** backend with the **Fastify Adapter**:
 
-### REST (Representational State Transfer)
-**Pros:**
-- **Simplicity & Predictability**: Very easy to implement and debug. HTTP caching works perfectly out of the box, which saves battery and data on mobile devices.
-- **Strict Contracts**: Endpoints do one thing, making it easier to lock down security (e.g., rate limiting the `/api/auth/login` endpoint is trivial).
-
-**Cons:**
-- **Over-fetching / Under-fetching**: Complex dashboards might require hitting multiple endpoints to gather all necessary data.
-
-### GraphQL
-**Pros:**
-- **Client-Driven Queries**: The client asks for exactly what it needs and nothing more. This is incredibly powerful for complex interfaces like the Admin Dashboard.
-- **Single Endpoint**: All data is fetched from a single `/graphql` endpoint, reducing the number of network round-trips.
-
-**Cons:**
-- **Complex Caching**: Because everything goes through one `POST` endpoint, traditional browser caching is much harder.
-- **Performance Risks**: A malicious or poorly written query could accidentally ask for highly nested, expensive database joins and crash the server.
-
-### Recommendation (The Dual-API Approach)
-For an emergency app like Guardian, we will use a **Dual-API Approach** mounted on a single backend server:
-
-1. **REST for Edge Clients (Mobile/Web)**: The absolute highest priority for end-users is reliability, simplicity, and low battery consumption. Exposing traditional routes (e.g., `/api/...`) ensures lightning-fast, cacheable endpoints that are highly predictable during an emergency.
-2. **GraphQL for Admin Dashboard**: The Admin Dashboard requires highly analytical, complex reports (e.g., joining users with their incident history and assigned responders). Exposing a single `/graphql` endpoint allows admins to fetch complex nested data in a single request without causing over-fetching.
-
-**How it works ("One Backend, Two Doors")**:
-Both the REST `/api` routes and the `/graphql` endpoint live on the exact same backend server. They both talk to the exact same underlying database services and core logic. The only difference is the "door" the client uses to request the data. This provides the best of both worlds without forcing us to write duplicate database code.
+1. **REST API for Edge Clients (Mobile/Web)**: Fast, deterministic, and cacheable endpoints for authentication, profile updates, emergency contact management, and multipart/base64 encrypted audio evidence uploads.
+2. **GraphQL API for Admin Dashboard**: A single `/graphql` endpoint allowing the admin console to execute complex multi-relational queries (users, historical incidents, responder logs) without over-fetching or multiple round-trips.
+3. **Socket.IO Event Bus for Emergency Operations**: Low-latency, bidirectional WebSocket connection for distress triggers, dynamic live GPS location streams, and proximity sentinel alerts.
 
 ---
 
 ## Part 2: Detailed API Contract & Event Topics
 
-Below is the technical specification for the hybrid design, providing concrete payloads and schemas to guide backend implementation.
+### A. Synchronous REST API (Fastify Controllers)
 
-### A. Synchronous REST API (Edge Clients)
+#### 1. Authentication & User Management (`/api/auth` & `/api/users`)
 
-#### Authentication & User Management
-
-**1. Register User**
+**Register User**
 - **Endpoint**: `POST /api/auth/register`
 - **Request Body**:
   ```json
   {
     "phone": "+1234567890",
-    "password": "hashed_password",
-    "name": "Jane Doe"
+    "password": "plain_text_password",
+    "name": "Jane Doe",
+    "role": "USER"
   }
   ```
 - **Response** (`201 Created`):
   ```json
   {
-    "token": "jwt_string_here",
-    "user": { "id": "u_123", "name": "Jane Doe" }
+    "token": "jwt_token_string",
+    "user": {
+      "id": "7b8f9e01-2345-6789-abcd-ef0123456789",
+      "phone": "+1234567890",
+      "name": "Jane Doe",
+      "role": "USER"
+    }
   }
   ```
 
-**2. Update Profile / Settings**
+**Login**
+- **Endpoint**: `POST /api/auth/login`
+- **Request Body**:
+  ```json
+  {
+    "phone": "+1234567890",
+    "password": "plain_text_password"
+  }
+  ```
+- **Response** (`200 OK`):
+  ```json
+  {
+    "token": "jwt_token_string",
+    "user": {
+      "id": "7b8f9e01-2345-6789-abcd-ef0123456789",
+      "name": "Jane Doe",
+      "role": "USER"
+    }
+  }
+  ```
+
+**Get Current User Profile**
+- **Endpoint**: `GET /api/users/me`
+- **Headers**: `Authorization: Bearer <token>`
+- **Response** (`200 OK`):
+  ```json
+  {
+    "id": "7b8f9e01-2345-6789-abcd-ef0123456789",
+    "phone": "+1234567890",
+    "name": "Jane Doe",
+    "role": "USER",
+    "isVolunteer": false,
+    "mlSensitivity": "MEDIUM",
+    "emergencyContacts": [
+      {
+        "id": "c1234567-89ab-cdef-0123-456789abcdef",
+        "contactName": "Emergency Contact 1",
+        "phoneNumber": "+1987654321",
+        "priorityOrder": 1
+      }
+    ]
+  }
+  ```
+
+**Update Profile & ML Sensitivity**
 - **Endpoint**: `PUT /api/users/me`
 - **Headers**: `Authorization: Bearer <token>`
 - **Request Body**:
   ```json
   {
-    "emergencyContacts": ["+1987654321"],
-    "mlSensitivity": "high"
+    "name": "Jane Doe",
+    "isVolunteer": true,
+    "mlSensitivity": "HIGH"
+  }
+  ```
+- **Response** (`200 OK`): Updated User object.
+
+**Manage Emergency Contacts**
+- **Add Contact**: `POST /api/users/me/emergency-contacts`
+- **Delete Contact**: `DELETE /api/users/me/emergency-contacts/:id`
+
+---
+
+#### 2. Incidents & Evidence Management (`/api/incidents`)
+
+**Create Emergency Incident (REST Fallback)**
+- **Endpoint**: `POST /api/incidents`
+- **Headers**: `Authorization: Bearer <token>`
+- **Request Body**:
+  ```json
+  {
+    "lat": 40.7128,
+    "lng": -74.0060,
+    "triggerType": "AUDIO_SCREAM",
+    "batteryLevel": 88,
+    "evidenceAudioUrl": "/uploads/evidence/evidence_123.m4a"
+  }
+  ```
+- **Response** (`201 Created`): Created Incident object.
+
+**Log Throttled Location Update**
+- **Endpoint**: `POST /api/incidents/:id/location`
+- **Request Body**:
+  ```json
+  {
+    "lat": 40.7129,
+    "lng": -74.0061,
+    "batteryLevel": 87
   }
   ```
 - **Response** (`200 OK`): `{ "success": true }`
 
-#### Community & Volunteer Network
-
-**1. Toggle Volunteer Mode**
-- **Endpoint**: `POST /api/volunteers/opt-in`
+**Upload Encrypted Audio Evidence Vault**
+- **Endpoint**: `POST /api/incidents/:id/evidence`
 - **Headers**: `Authorization: Bearer <token>`
-- **Response** (`200 OK`): `{ "status": "active_sentinel" }`
+- **Payload Options**:
+  1. *Multipart file stream*: Field name `file`
+  2. *Base64 JSON payload*: `{ "audioBase64": "data:audio/m4a;base64,..." }`
+  3. *Direct URL*: `{ "evidenceAudioUrl": "https://..." }`
+- **Response** (`200 OK`):
+  ```json
+  {
+    "success": true,
+    "incidentId": "inc_123",
+    "evidenceAudioUrl": "/uploads/evidence/evidence_inc_123_1773900000.m4a",
+    "vaultSize": 145200,
+    "timestamp": "2026-06-13T10:00:00.000Z"
+  }
+  ```
+
+**Get Incident Details & Breadcrumb Logs**
+- **Endpoint**: `GET /api/incidents/:id`
+- **Response** (`200 OK`): Incident record with `user`, `resolvedByUser`, and `locationLogs` array.
+
+**Update Incident Status**
+- **Endpoint**: `PATCH /api/incidents/:id/status`
+- **Request Body**:
+  ```json
+  {
+    "status": "DISPATCHED"
+  }
+  ```
+- **Response** (`200 OK`): Updated Incident record.
+
+**Notify Emergency Contacts (SMS Fallback)**
+- **Endpoint**: `POST /api/incidents/:id/notify-contacts`
+- **Response** (`200 OK`): Dispatched SMS status report.
 
 ---
 
-### B. GraphQL API (Admin Dashboard)
+### B. GraphQL API (Admin Intelligence Console)
 
-Instead of multiple REST endpoints, the Admin Dashboard uses a single `/graphql` endpoint to fetch highly nested data in one request.
+Mounted at `/graphql` via Apollo Server on Fastify.
 
-**Example Schema Definition**:
 ```graphql
-type User {
-  id: ID!
-  name: String!
-  isVolunteer: Boolean!
-  incidents: [Incident!]!
-}
-
-type Incident {
-  id: ID!
-  timestamp: String!
-  triggerType: String!
-  resolvedBy: String
-}
-
 type Query {
-  getAllUsers(limit: Int): [User!]!
-  getIncidentReport(timeframe: String!): [Incident!]!
+  users: [User!]!
+  user(id: ID!): User
+  incidents(status: IncidentStatus): [Incident!]!
+  incident(id: ID!): Incident
+  activeIncidentsCount: Int!
+}
+
+type Mutation {
+  updateUserRole(userId: ID!, role: UserRole!): User!
+  resolveIncident(incidentId: ID!, status: IncidentStatus!): Incident!
 }
 ```
 
 ---
 
-### C. Asynchronous Event Bus (Emergency Operations)
+### C. Socket.IO Real-Time Event Bus (`SosGateway`)
 
-Unlike REST/GraphQL, these are real-time topics/streams handled via WebSockets or message brokers.
+WebSockets run on the primary server port (`ws://localhost:3000`).
 
-**1. Distress Triggered**
-- **Topic:** `events.distress.triggered`
-- **Publisher:** User Edge Client (via SOS button or local ML trigger).
-- **Subscribers:** Emergency Responder Dashboard, Admin DB Logger.
+#### 1. Distress Triggered
+- **Event:** `distress:triggered`
+- **Publisher:** Mobile Client (SOS button, scream detector, or snatch trigger)
 - **Payload Schema:**
   ```json
   {
     "userId": "u_123",
-    "timestamp": "2026-06-13T10:00:00Z",
-    "triggerType": "audio_scream",
-    "coordinates": { "lat": 40.7128, "lng": -74.0060 }
+    "lat": 40.7128,
+    "lng": -74.0060,
+    "triggerType": "AUDIO_SCREAM",
+    "batteryLevel": 85,
+    "evidenceAudioUrl": "/uploads/evidence/vault_123.m4a"
   }
   ```
+- **Server Actions:**
+  1. Creates `Incident` record in PostgreSQL (`status: ACTIVE`).
+  2. Emits `distress:acknowledged` to the mobile client.
+  3. Queries Redis GEO for volunteers within 500m.
+  4. Emits `nearby:broadcast` to nearby volunteers and `room:responders`.
+  5. Emits `incident:new` globally.
 
-**2. Live Location Update**
-- **Topic:** `events.distress.location_update`
-- **Publisher:** User Edge Client (fires every 3-5 seconds during active distress).
-- **Subscribers:** Emergency Responder Dashboard, Nearby Volunteers.
+#### 2. Live Location Streaming
+- **Event:** `location:update`
+- **Publisher:** Mobile Client (1 ping/sec in SOS mode, 1 ping/10sec in standby)
 - **Payload Schema:**
   ```json
   {
     "incidentId": "inc_999",
-    "coordinates": { "lat": 40.7129, "lng": -74.0061 },
-    "batteryLevel": 45,
-    "speed": 1.2
+    "lat": 40.7129,
+    "lng": -74.0061,
+    "batteryLevel": 84
   }
   ```
+- **Server Actions:**
+  - Throttles PostgreSQL database write (max 1 write every 2 seconds).
+  - Updates active incident Redis cache.
+  - Broadcasts `location:update` to `room:inc_999` and `room:responders`.
+  - Broadcasts `location:breadcrumb` for live map plotting.
 
-**3. Nearby Broadcast (Community Mesh)**
-- **Topic:** `events.distress.broadcast_nearby`
-- **Publisher:** Core Backend (calculates geofence and routes the alert).
-- **Subscribers:** Users with "Volunteer Mode" active within 500m.
+#### 3. Proximity Broadcast (Sentinel Mesh)
+- **Event:** `nearby:broadcast`
+- **Receiver:** Active volunteers within 500m & Responder Console
 - **Payload Schema:**
   ```json
   {
     "incidentId": "inc_999",
-    "distanceMeters": 320,
-    "coordinates": { "lat": 40.7128, "lng": -74.0060 }
+    "victimId": "u_123",
+    "victimName": "Jane Doe",
+    "victimPhone": "+1234567890",
+    "coordinates": { "lat": 40.7128, "lng": -74.0060 },
+    "distanceMeters": 250,
+    "batteryLevel": 85,
+    "triggerType": "AUDIO_SCREAM",
+    "startedAt": "2026-06-13T10:00:00.000Z",
+    "status": "ACTIVE"
   }
   ```
 
-**4. Responder Status Change**
-- **Topic:** `events.responder.status_change`
-- **Publisher:** Emergency Responder Dashboard.
-- **Subscribers:** User Edge Client (victim).
+#### 4. Responder Status Transition
+- **Event:** `responder:status_change`
+- **Publisher:** Responder Dashboard
 - **Payload Schema:**
   ```json
   {
     "incidentId": "inc_999",
-    "status": "unit_dispatched",
+    "responderId": "u_responder_1",
+    "status": "DISPATCHED",
     "estimatedArrivalMins": 4
   }
   ```
+- **Server Broadcasts:**
+  - `events.responder.status_change` to `room:inc_999`
+  - `incident:status_changed` and `responder:status_changed` to `room:responders`
 
-**5. System Configuration Update**
-- **Topic:** `events.system.configuration_update`
-- **Publisher:** Admin Dashboard.
-- **Subscribers:** All Edge Clients.
+#### 5. Dynamic System Configuration
+- **Event:** `system:config_update`
+- **Publisher:** Admin Dashboard
+- **Server Broadcast:** `events.system.configuration_update`
 - **Payload Schema:**
   ```json
   {
     "type": "ml_threshold_update",
-    "newWeights": { "scream_confidence": 0.85 }
+    "newWeights": { "screamConfidence": 0.85, "snatchThreshold": 2.4 }
   }
   ```
