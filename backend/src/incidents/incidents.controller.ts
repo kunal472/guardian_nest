@@ -82,6 +82,18 @@ export class IncidentsController {
       finalFileUrl,
     );
 
+    if (this.sosGateway?.server) {
+      this.sosGateway.server.emit('incident:updated', updatedIncident);
+      this.sosGateway.server.to(`room:inc_${incidentId}`).emit('incident:evidence_uploaded', {
+        incidentId,
+        evidenceAudioUrl: finalFileUrl,
+      });
+      this.sosGateway.server.to('room:responders').emit('incident:evidence_uploaded', {
+        incidentId,
+        evidenceAudioUrl: finalFileUrl,
+      });
+    }
+
     return {
       success: true,
       incidentId,

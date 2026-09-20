@@ -29,6 +29,8 @@ import { AdminAuth } from './components/AdminAuth';
 import { getStoredAuth, clearStoredAuth, AdminAuthUser } from './services/auth';
 import { logger } from './services/logger';
 
+import { getSocket } from './services/socket';
+
 export const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<AdminAuthUser | null>(() => {
     const auth = getStoredAuth();
@@ -61,8 +63,33 @@ export const App: React.FC = () => {
     if (currentUser) {
       logger.info(`Admin session active for ${currentUser.name || currentUser.phone} (${currentUser.role})`);
       loadData();
-      const interval = setInterval(loadData, 5000); // 5s GraphQL poll for admin analytics
-      return () => clearInterval(interval);
+
+      // Real-time Event Bus listener for instant status sync from mobile and responders
+      const auth = getStoredAuth();
+      const socket = getSocket(auth?.token);
+
+      const handleRealtimeUpdate = (payload: any) => {
+        logger.info('⚡ Real-time status update received on Admin Dashboard:', payload);
+        loadData();
+      };
+
+      socket.on('incident:status_changed', handleRealtimeUpdate);
+      socket.on('responder:status_changed', handleRealtimeUpdate);
+      socket.on('events.responder.status_change', handleRealtimeUpdate);
+      socket.on('incident:new', handleRealtimeUpdate);
+      socket.on('incident:updated', handleRealtimeUpdate);
+      socket.on('distress:cancelled', handleRealtimeUpdate);
+
+      const interval = setInterval(loadData, 5000); // 5s GraphQL background poll
+      return () => {
+        clearInterval(interval);
+        socket.off('incident:status_changed', handleRealtimeUpdate);
+        socket.off('responder:status_changed', handleRealtimeUpdate);
+        socket.off('events.responder.status_change', handleRealtimeUpdate);
+        socket.off('incident:new', handleRealtimeUpdate);
+        socket.off('incident:updated', handleRealtimeUpdate);
+        socket.off('distress:cancelled', handleRealtimeUpdate);
+      };
     }
   }, [currentUser]);
 

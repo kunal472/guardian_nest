@@ -1,12 +1,12 @@
 # Project Guardian: Database, Redis & Infrastructure Architecture
 
-This document provides a comprehensive specification of the data storage layers, in-memory caching engines, cloud evidence storage, and Docker container infrastructure in Project Guardian.
+This document provides a comprehensive specification of the data storage layers, in-memory caching engines, encrypted evidence storage, and Docker container infrastructure in Project Guardian.
 
 ---
 
 ## 1. Primary Database: PostgreSQL (Prisma ORM)
 
-PostgreSQL serves as the primary relational database for permanent data persistence.
+PostgreSQL serves as the primary relational database for permanent data persistence, managed via **Prisma ORM 7** with the `@prisma/adapter-pg` driver.
 
 ### A. Environment Configuration (`.env`)
 ```env
@@ -110,61 +110,11 @@ model IncidentLocationLog {
 }
 ```
 
-### C. Native SQL Bootstrap Script (`db/init.sql`)
-```sql
-CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
-
-CREATE TYPE user_role AS ENUM ('USER', 'RESPONDER', 'ADMIN');
-CREATE TYPE ml_sensitivity AS ENUM ('LOW', 'MEDIUM', 'HIGH');
-CREATE TYPE trigger_type AS ENUM ('MANUAL_SOS', 'AUDIO_SCREAM', 'DEVICE_SNATCH', 'DEAD_MAN_SWITCH');
-CREATE TYPE incident_status AS ENUM ('ACTIVE', 'DISPATCHED', 'RESOLVED', 'FALSE_ALARM');
-
-CREATE TABLE users (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    phone VARCHAR(20) UNIQUE NOT NULL,
-    password_hash VARCHAR(255) NOT NULL,
-    name VARCHAR(255) NOT NULL,
-    role user_role DEFAULT 'USER',
-    is_volunteer BOOLEAN DEFAULT FALSE,
-    ml_sensitivity ml_sensitivity DEFAULT 'MEDIUM',
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE emergency_contacts (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
-    contact_name VARCHAR(255) NOT NULL,
-    phone_number VARCHAR(20) NOT NULL,
-    priority_order INTEGER DEFAULT 1,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE incidents (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
-    trigger_type trigger_type NOT NULL,
-    status incident_status DEFAULT 'ACTIVE',
-    startedAt TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    resolved_at TIMESTAMP WITH TIME ZONE,
-    resolved_by_user_id UUID REFERENCES users(id),
-    evidence_audio_url VARCHAR(1024)
-);
-
-CREATE TABLE incident_location_logs (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    incident_id UUID REFERENCES incidents(id) ON DELETE CASCADE,
-    lat DOUBLE PRECISION NOT NULL,
-    lng DOUBLE PRECISION NOT NULL,
-    battery_level INTEGER,
-    logged_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-);
-```
-
 ---
 
 ## 2. In-Memory Engine: Redis Data Structures
 
-Redis is used for high-velocity session caching, ephemeral incident states, and sub-millisecond geospatial indexing.
+Redis 7 (via `ioredis`) is used for real-time session caching, sub-millisecond proximity queries, and database write throttling locks.
 
 ### Key Schemas & Data Formats
 
@@ -178,34 +128,41 @@ Redis is used for high-velocity session caching, ephemeral incident states, and 
    * **Value**:
      ```json
      {
-       "userId": "u_123",
-       "lastLat": 40.7128,
-       "lastLng": -74.0060,
-       "lastUpdated": 1770800000,
-       "activeResponders": ["u_456"]
+       "lat": 40.7128,
+       "lng": -74.0060,
+       "batteryLevel": 85,
+       "lastUpdated": 1773900000
      }
      ```
    * **TTL**: 3600 seconds (1 Hour)
 
 3. **Active Volunteer Geospatial Index (Redis GEO)**
    * **Key**: `volunteers:active_locations`
-   * **Data Structure**: Sorted Set (Geospatial Index)
-   * **Commands**:
-     ```bash
-     # Add/Update Volunteer location
-     GEOADD volunteers:active_locations -74.0060 40.7128 "user_id_456"
+   * **Data Structure**: Geospatial Index (Sorted Set)
+   * **Operations**:
+     ```typescript
+     // Add or update volunteer position
+     await redis.geoadd('volunteers:active_locations', lng, lat, volunteerId);
 
-     # Search for volunteers within 500 meters of SOS coordinates
-     GEOSEARCH volunteers:active_locations FROMLONLAT -74.0060 40.7128 BYRADIUS 500 m
+     // Query volunteers within 500m radius of SOS coordinates
+     const nearbyVolunteers = await redis.geosearch(
+       'volunteers:active_locations',
+       'FROMLONLAT', lng, lat,
+       'BYRADIUS', 500, 'm'
+     );
      ```
+
+4. **Postgres Write Throttling Key**
+   * **Key**: `incident:${incidentId}:last_db_write`
+   * **Value**: Unix timestamp (seconds) of the last persistent write to `incident_location_logs`.
+   * **TTL**: 3600 seconds
 
 ---
 
-## 3. Object Storage: AWS S3 Evidence Vault
+## 3. Evidence Storage & Audio Vault
 
-* **Bucket Name**: `guardian-evidence-vault`
-* **Object Path Structure**: `/{incident_id}/evidence_{timestamp}.m4a`
-* **Access Pattern**: Audio chunks (30s encrypted PCM/M4A) uploaded directly from mobile client. Admins generate short-lived **AWS Presigned URLs** (valid for 300s) via Apollo GraphQL resolvers to play back audio.
+* **Local Vault**: Handled by Fastify multipart and stream storage in `/backend/uploads/evidence/evidence_${incidentId}_${timestamp}.m4a`.
+* **Cloud Vault (AWS S3)**: Encrypted private bucket with short-lived Presigned URLs generated dynamically via `/api/incidents/:id/audio-presigned-url` (valid for 300 seconds).
 
 ---
 
@@ -224,7 +181,6 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./backend/db/init.sql:/docker-entrypoint-initdb.d/init.sql
 
   redis:
     image: redis:7-alpine
@@ -241,41 +197,31 @@ volumes:
 
 ---
 
-## 5. Master Recreation Guide (End-to-End Environment Setup)
-
-To recreate the entire infrastructure and bring up all database services from scratch:
+## 5. Master Environment Setup Guide
 
 ```bash
-# 1. Clone & enter repository
-git clone <repository_url>
-cd guardian_new
+# 1. Start PostgreSQL 15 & Redis 7 Docker Containers
+docker compose up -d
 
-# 2. Start PostgreSQL 15 & Redis 7 Docker Containers
-docker-compose up -d
-
-# 3. Verify Docker services are running
-docker ps
-
-# 4. Run Prisma database migrations inside backend
+# 2. Setup & Launch NestJS Backend
 cd backend
 bun install
-npx prisma db push
+bunx prisma generate
+bunx prisma db push
+bun run dev
 
-# 5. Launch Core Backend API & Socket Server
-bun dev
-
-# 6. Launch Responder Dashboard (in separate terminal)
+# 3. Launch Responder Dashboard
 cd ../dashboards/responder_dashboard
 bun install
 bun dev
 
-# 7. Launch Admin Dashboard (in separate terminal)
+# 4. Launch Admin Dashboard
 cd ../admin_dashboard
 bun install
 bun dev
 
-# 8. Launch Mobile Edge Client (in separate terminal)
+# 5. Launch Mobile Edge Client
 cd ../../mobile
 bun install
-bun start
+bun run start
 ```

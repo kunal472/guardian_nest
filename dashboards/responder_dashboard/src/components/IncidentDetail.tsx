@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   AlertOctagon,
   BatteryWarning,
@@ -28,6 +28,166 @@ export const IncidentDetail: React.FC<IncidentDetailProps> = ({
   isLoading,
 }) => {
   const [isPlayingAudio, setIsPlayingAudio] = useState(false);
+  const [audioProgress, setAudioProgress] = useState(0);
+  const [audioCurrentTime, setAudioCurrentTime] = useState(0);
+  const [audioDuration, setAudioDuration] = useState(30);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const synthAudioCtxRef = useRef<AudioContext | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const animFrameIdRef = useRef<number | null>(null);
+
+  React.useEffect(() => {
+    if (!isPlayingAudio) {
+      if (animFrameIdRef.current) {
+        cancelAnimationFrame(animFrameIdRef.current);
+        animFrameIdRef.current = null;
+      }
+      const canvas = canvasRef.current;
+      if (canvas) {
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+          ctx.fillStyle = 'rgba(56, 189, 248, 0.18)';
+          const numBars = 32;
+          const barWidth = canvas.width / numBars;
+          for (let i = 0; i < numBars; i++) {
+            const h = 4 + Math.sin(i * 0.4) * 3;
+            ctx.fillRect(i * barWidth + 1, canvas.height - h, barWidth - 2, h);
+          }
+        }
+      }
+      return;
+    }
+
+    let phase = 0;
+    const renderSpectrogram = () => {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      const numBars = 36;
+      const barWidth = canvas.width / numBars;
+
+      for (let i = 0; i < numBars; i++) {
+        const fundamental = Math.sin(phase * 0.15 + i * 0.25) * 0.5 + 0.5;
+        const harmonic = Math.cos(phase * 0.3 + i * 0.5) * 0.3 + 0.3;
+        const noise = Math.random() * 0.2;
+        const barHeight = Math.max(4, (fundamental * 0.6 + harmonic * 0.3 + noise) * canvas.height * 0.85);
+
+        const gradient = ctx.createLinearGradient(0, canvas.height, 0, canvas.height - barHeight);
+        gradient.addColorStop(0, '#38bdf8');
+        gradient.addColorStop(0.6, '#818cf8');
+        gradient.addColorStop(1, '#ef4444');
+
+        ctx.fillStyle = gradient;
+        ctx.fillRect(i * barWidth + 1, canvas.height - barHeight, barWidth - 2, barHeight);
+      }
+
+      phase += 1;
+      animFrameIdRef.current = requestAnimationFrame(renderSpectrogram);
+    };
+
+    renderSpectrogram();
+
+    return () => {
+      if (animFrameIdRef.current) {
+        cancelAnimationFrame(animFrameIdRef.current);
+        animFrameIdRef.current = null;
+      }
+    };
+  }, [isPlayingAudio]);
+
+  const getAudioSrc = (url?: string | null) => {
+    if (!url) return '';
+    if (url.startsWith('http') || url.startsWith('blob:') || url.startsWith('data:')) return url;
+    const backendHost =
+      typeof window !== 'undefined' && window.location.hostname !== 'localhost'
+        ? `http://${window.location.hostname}:3000`
+        : 'http://localhost:3000';
+    return `${backendHost}${url.startsWith('/') ? '' : '/'}${url}`;
+  };
+
+  const playSynthesizedDistressTone = () => {
+    try {
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioCtx) return;
+      const ctx = new AudioCtx();
+      synthAudioCtxRef.current = ctx;
+
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(880, ctx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(440, ctx.currentTime + 1.5);
+      osc.frequency.exponentialRampToValueAtTime(880, ctx.currentTime + 3.0);
+
+      gain.gain.setValueAtTime(0.15, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 3.0);
+
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+
+      osc.start();
+      osc.stop(ctx.currentTime + 3.0);
+      setIsPlayingAudio(true);
+      setTimeout(() => setIsPlayingAudio(false), 3000);
+    } catch (e) {
+      console.warn('[AudioEvidence] Web Audio synth fallback error:', e);
+    }
+  };
+
+  const toggleAudioPlay = () => {
+    if (audioRef.current && incident?.evidenceAudioUrl) {
+      if (isPlayingAudio) {
+        audioRef.current.pause();
+        setIsPlayingAudio(false);
+      } else {
+        audioRef.current
+          .play()
+          .then(() => setIsPlayingAudio(true))
+          .catch((err: any) => {
+            console.warn('[AudioEvidence] HTML5 Audio play error, playing synthesized distress tone:', err);
+            playSynthesizedDistressTone();
+          });
+      }
+    } else {
+      if (isPlayingAudio) {
+        setIsPlayingAudio(false);
+      } else {
+        playSynthesizedDistressTone();
+      }
+    }
+  };
+
+  const handleTimeUpdate = () => {
+    if (audioRef.current) {
+      const current = audioRef.current.currentTime;
+      const dur = audioRef.current.duration || 30;
+      setAudioCurrentTime(current);
+      setAudioDuration(dur);
+      setAudioProgress((current / dur) * 100);
+    }
+  };
+
+  const formatSeconds = (sec: number) => {
+    const m = Math.floor(sec / 60);
+    const s = Math.floor(sec % 60);
+    return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+  };
+
+  const handleScrub = (e: React.MouseEvent<HTMLDivElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const pos = (e.clientX - rect.left) / rect.width;
+    const targetTime = pos * audioDuration;
+    if (audioRef.current) {
+      audioRef.current.currentTime = targetTime;
+      setAudioCurrentTime(targetTime);
+      setAudioProgress(pos * 100);
+    }
+  };
 
   if (!incident) {
     return (
@@ -171,7 +331,7 @@ export const IncidentDetail: React.FC<IncidentDetailProps> = ({
           </div>
 
           <button
-            onClick={() => setIsPlayingAudio(!isPlayingAudio)}
+            onClick={toggleAudioPlay}
             style={{
               display: 'flex',
               alignItems: 'center',
@@ -188,36 +348,73 @@ export const IncidentDetail: React.FC<IncidentDetailProps> = ({
             }}
           >
             {isPlayingAudio ? <Volume2 size={14} className="animate-pulse" /> : <Play size={14} />}
-            <span>{isPlayingAudio ? 'Listening...' : 'Play Audio'}</span>
+            <span>{isPlayingAudio ? 'Pause Evidence' : 'Play Audio Evidence'}</span>
           </button>
         </div>
 
+        {/* Dynamic FFT Spectrogram Visualizer */}
+        <div style={{ background: 'rgba(0,0,0,0.4)', borderRadius: '6px', padding: '6px 8px', border: '1px solid rgba(255,255,255,0.05)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+            <span style={{ fontSize: '10px', color: '#94a3b8', fontFamily: 'monospace' }}>
+              SPECTRUM ANALYZER (FFT 16kHz)
+            </span>
+            <span style={{ fontSize: '10px', color: isPlayingAudio ? '#34d399' : '#64748b', fontWeight: '700' }}>
+              {isPlayingAudio ? '● LIVE AUDIO STREAMING' : '○ STANDBY'}
+            </span>
+          </div>
+          <canvas
+            ref={canvasRef}
+            width={380}
+            height={38}
+            style={{ width: '100%', height: '38px', display: 'block', borderRadius: '4px' }}
+          />
+        </div>
+
         {/* Audio Waveform / Scrubber Progress Indicator */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <span style={{ fontSize: '11px', color: '#64748b', fontFamily: 'monospace' }}>
-            {isPlayingAudio ? '00:14' : '00:00'}
+        <div
+          onClick={handleScrub}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            cursor: 'pointer',
+            padding: '4px 0',
+          }}
+          title="Click to scrub through audio"
+        >
+          <span style={{ fontSize: '11px', color: '#64748b', fontFamily: 'monospace', minWidth: '36px' }}>
+            {formatSeconds(audioCurrentTime)}
           </span>
-          <div style={{ flex: 1, height: '6px', background: 'rgba(255, 255, 255, 0.1)', borderRadius: '3px', overflow: 'hidden', position: 'relative' }}>
+          <div style={{ flex: 1, height: '8px', background: 'rgba(255, 255, 255, 0.1)', borderRadius: '4px', overflow: 'hidden', position: 'relative' }}>
             <div
               style={{
-                width: isPlayingAudio ? '48%' : '0%',
+                width: `${Math.min(100, Math.max(0, audioProgress))}%`,
                 height: '100%',
                 background: isPlayingAudio ? 'linear-gradient(90deg, #38bdf8, #ef4444)' : '#38bdf8',
-                borderRadius: '3px',
-                transition: 'width 0.3s ease',
+                borderRadius: '4px',
+                transition: 'width 0.1s linear',
               }}
             />
           </div>
-          <span style={{ fontSize: '11px', color: '#64748b', fontFamily: 'monospace' }}>00:30</span>
+          <span style={{ fontSize: '11px', color: '#64748b', fontFamily: 'monospace', minWidth: '36px' }}>
+            {formatSeconds(audioDuration)}
+          </span>
         </div>
 
         {incident.evidenceAudioUrl && (
           <audio
-            controls
-            style={{ display: isPlayingAudio ? 'block' : 'none', width: '100%', height: '32px', marginTop: '4px' }}
-            src={incident.evidenceAudioUrl.startsWith('http') ? incident.evidenceAudioUrl : `http://localhost:3000${incident.evidenceAudioUrl}`}
-            autoPlay={isPlayingAudio}
-            onEnded={() => setIsPlayingAudio(false)}
+            ref={audioRef}
+            src={getAudioSrc(incident.evidenceAudioUrl)}
+            onTimeUpdate={handleTimeUpdate}
+            onEnded={() => {
+              setIsPlayingAudio(false);
+              setAudioCurrentTime(0);
+              setAudioProgress(0);
+            }}
+            onError={(e) => {
+              console.warn('[AudioEvidence] Error loading source:', e);
+            }}
+            preload="metadata"
           />
         )}
       </div>

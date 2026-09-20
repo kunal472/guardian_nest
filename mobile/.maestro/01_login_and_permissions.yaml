@@ -1,0 +1,47 @@
+appId: com.anonymous.guardianmobile
+---
+# Flow 1: Cold Launch, Runtime Permissions, and Citizen Login
+- launchApp:
+    clearState: true
+
+# 1. Handle Android OS Runtime Permissions (Microphone, Location, Notifications)
+- runFlow:
+    when:
+      visible: "While using the app"
+    commands:
+      - tapOn: "While using the app"
+
+- runFlow:
+    when:
+      visible: "Allow"
+    commands:
+      - tapOn: "Allow"
+
+# 2. Verify Authentication Screen Loaded
+- assertVisible: "GUARDIAN"
+- assertVisible: "Sign In"
+
+# 3. Enter Credentials
+- tapOn:
+    placeholder: "\\+1 \\(555\\) 000-0000"
+- inputText: "+1555019999"
+
+- tapOn:
+    placeholder: "••••••••"
+- inputText: "DemoPass123!"
+
+- hideKeyboard
+
+# 4. Submit Sign In or Continue as Guest
+- tapOn: "Sign In"
+
+# 5. Fallback if offline/local dev: Tap Guest Mode
+- runFlow:
+    when:
+      visible: "Continue as Guest / Demo Mode"
+    commands:
+      - tapOn: "Continue as Guest / Demo Mode"
+
+# 6. Verify Dashboard Loaded in Idle Sentinel State
+- assertVisible: "SYSTEM READY"
+- assertVisible: "HOLD 3S FOR EMERGENCY SOS"

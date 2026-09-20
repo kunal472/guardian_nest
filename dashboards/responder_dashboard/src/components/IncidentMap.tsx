@@ -38,15 +38,42 @@ export const IncidentMap: React.FC<IncidentMapProps> = ({
   const [autoFollow, setAutoFollow] = useState<boolean>(true);
   const [mapStyle, setMapStyle] = useState<'dark' | 'osm'>('dark');
   const [showGeofence, setShowGeofence] = useState<boolean>(true);
+  const [responderLocation, setResponderLocation] = useState<{ lat: number; lng: number } | null>(null);
+  const prevIncidentIdRef = useRef<string | null>(null);
+  const prevCoordsRef = useRef<{ lat: number; lng: number } | null>(null);
+  const responderMarkerRef = useRef<L.Marker | null>(null);
 
-  const currentLat =
+  // Retrieve genuine incident coordinates or fallback to latest log / browser location
+  const rawLat =
     liveCoordinates?.lat ??
-    incident?.locationLogs?.[incident.locationLogs.length - 1]?.lat ??
-    40.7128;
-  const currentLng =
+    incident?.locationLogs?.[incident.locationLogs.length - 1]?.lat;
+  const rawLng =
     liveCoordinates?.lng ??
-    incident?.locationLogs?.[incident.locationLogs.length - 1]?.lng ??
-    -74.006;
+    incident?.locationLogs?.[incident.locationLogs.length - 1]?.lng;
+
+  const hasGenuineLocation = rawLat !== undefined && rawLng !== undefined && (rawLat !== 0 || rawLng !== 0);
+
+  // Default coordinate: use genuine location if available, or responder location, or default
+  const currentLat = hasGenuineLocation ? rawLat! : (responderLocation?.lat ?? 18.5204);
+  const currentLng = hasGenuineLocation ? rawLng! : (responderLocation?.lng ?? 73.8567);
+
+  // Detect responder browser geolocation once on mount
+  useEffect(() => {
+    if (typeof navigator !== 'undefined' && navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          setResponderLocation({
+            lat: pos.coords.latitude,
+            lng: pos.coords.longitude,
+          });
+        },
+        (err) => {
+          console.warn('[IncidentMap] Geolocation lookup skipped:', err.message);
+        },
+        { enableHighAccuracy: true, timeout: 5000, maximumAge: 60000 },
+      );
+    }
+  }, []);
 
   // Initialize Leaflet Map
   useEffect(() => {
@@ -89,6 +116,21 @@ export const IncidentMap: React.FC<IncidentMapProps> = ({
     };
   }, []);
 
+  // Recenter or fly to new coordinates whenever incident ID changes or genuine GPS arrives
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    if (!map) return;
+
+    const isIncidentChanged = incident?.id && incident.id !== prevIncidentIdRef.current;
+    const isFirstGenuineLocation = hasGenuineLocation && (!prevCoordsRef.current || (prevCoordsRef.current.lat === 0 && prevCoordsRef.current.lng === 0));
+
+    if (isIncidentChanged || isFirstGenuineLocation) {
+      prevIncidentIdRef.current = incident?.id || null;
+      prevCoordsRef.current = { lat: currentLat, lng: currentLng };
+      map.setView([currentLat, currentLng], 16, { animate: true });
+    }
+  }, [incident?.id, currentLat, currentLng, hasGenuineLocation]);
+
   // Update Tile Layer on Style Change
   useEffect(() => {
     if (!mapInstanceRef.current || !tileLayerRef.current) return;
@@ -107,7 +149,7 @@ export const IncidentMap: React.FC<IncidentMapProps> = ({
     tileLayerRef.current = newTileLayer;
   }, [mapStyle]);
 
-  // Update Dynamic Overlays (Victim Marker, Geofence, Breadcrumbs, Nearby Sentinels)
+  // Update Dynamic Overlays (Victim Marker, Geofence, Breadcrumbs, Nearby Sentinels, Responder Marker)
   useEffect(() => {
     const map = mapInstanceRef.current;
     if (!map) return;
@@ -147,7 +189,47 @@ export const IncidentMap: React.FC<IncidentMapProps> = ({
 
     // Auto-pan if autoFollow is active
     if (autoFollow) {
-      map.panTo([currentLat, currentLng], { animate: true, duration: 0.8 });
+      const prevLat = prevCoordsRef.current?.lat;
+      const prevLng = prevCoordsRef.current?.lng;
+      const distance = prevLat && prevLng ? Math.hypot(currentLat - prevLat, currentLng - prevLng) : 0;
+      
+      // If location changed drastically (e.g. initial fix arrived from far away), setView instead of panning
+      if (distance > 0.05) {
+        map.setView([currentLat, currentLng], 16, { animate: true });
+      } else {
+        map.panTo([currentLat, currentLng], { animate: true, duration: 0.8 });
+      }
+      prevCoordsRef.current = { lat: currentLat, lng: currentLng };
+    }
+
+    // Render Responder Unit Marker if responder browser position is available
+    if (responderLocation) {
+      const respHtml = `
+        <div style="display: flex; flex-direction: column; align-items: center; cursor: pointer;">
+          <div style="width: 22px; height: 22px; border-radius: 50%; background: #06b6d4; border: 2px solid #ffffff; box-shadow: 0 0 10px rgba(6,182,212,0.8); display: flex; align-items: center; justify-content: center;">
+            <div style="width: 8px; height: 8px; border-radius: 50%; background: #ffffff;"></div>
+          </div>
+          <div style="background: rgba(15,23,42,0.9); color: #06b6d4; font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(6,182,212,0.4); margin-top: 2px; white-space: nowrap;">
+            Responder Unit (You)
+          </div>
+        </div>
+      `;
+      const respIcon = L.divIcon({
+        html: respHtml,
+        className: '',
+        iconSize: [36, 36],
+        iconAnchor: [18, 11],
+      });
+
+      if (!responderMarkerRef.current) {
+        responderMarkerRef.current = L.marker([responderLocation.lat, responderLocation.lng], {
+          icon: respIcon,
+          zIndexOffset: 900,
+        }).addTo(map);
+      } else {
+        responderMarkerRef.current.setLatLng([responderLocation.lat, responderLocation.lng]);
+        responderMarkerRef.current.setIcon(respIcon);
+      }
     }
 
     // 2. Update Breadcrumb Polyline & Waypoints
