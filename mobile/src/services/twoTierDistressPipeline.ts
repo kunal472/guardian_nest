@@ -448,10 +448,16 @@ class TwoTierDistressPipeline {
     const bioResult = speakerBiometricsService.verifySpeaker(embedding);
 
     const matchPercent = Math.round(bioResult.similarity * 100);
+    const matchPercent = Math.round(bioResult.similarity * 100);
     this.telemetry.speakerBiometrics = bioResult;
+    this.telemetry.liveBiometricScore = matchPercent;
     this.telemetry.liveBiometricScore = matchPercent;
     this.emitState();
 
+    // Confidence Product Scoring: allows whispered/quiet distress when keyword match is high (confidence >= 0.80 and similarity >= 0.55)
+    const isPassing = bioResult.isMatch || (confidence >= 0.80 && bioResult.similarity >= 0.55);
+
+    if (!isPassing) {
     // Confidence Product Scoring: allows whispered/quiet distress when keyword match is high (confidence >= 0.80 and similarity >= 0.55)
     const isPassing = bioResult.isMatch || (confidence >= 0.80 && bioResult.similarity >= 0.55);
 
