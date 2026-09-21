@@ -18,7 +18,7 @@ export class LocationLog {
   lng: number;
 
   @Field(() => Int, { nullable: true })
-  batteryLevel?: number;
+  batteryLevel?: number | null;
 
   @Field()
   loggedAt: string;
@@ -42,16 +42,16 @@ export class Incident {
   startedAt: string;
 
   @Field({ nullable: true })
-  resolvedAt?: string;
+  resolvedAt?: string | null;
 
   @Field({ nullable: true })
-  resolvedByUserId?: string;
+  resolvedByUserId?: string | null;
 
   @Field(() => [LocationLog])
   locationLogs: LocationLog[];
 
   @Field({ nullable: true })
-  evidenceAudioUrl?: string;
+  evidenceAudioUrl?: string | null;
 }
 
 @ObjectType()

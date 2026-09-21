@@ -451,6 +451,55 @@ export default function App() {
     setTimeout(() => setResolutionNotice(null), 8000);
   };
 
+  const handlePromptCancelSos = () => {
+    setShowCancelModal(true);
+  };
+
+  const handleResolveSos = async (status: "RESOLVED" | "FALSE_ALARM") => {
+    setShowCancelModal(false);
+    const targetIncId = incidentIdRef.current || incidentId;
+
+    if (targetIncId) {
+      // 1. Emit status change over Socket.IO
+      if (socketRef.current?.connected) {
+        socketRef.current.emit("responder:status_change", {
+          incidentId: targetIncId,
+          status,
+        });
+        socketRef.current.emit("incident:status_change", {
+          incidentId: targetIncId,
+          status,
+        });
+      }
+
+      // 2. Transmit PATCH update to REST backend
+      try {
+        await fetch(`${backendUrl}/api/incidents/${targetIncId}/status`, {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+            ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+          },
+          body: JSON.stringify({ status }),
+        });
+      } catch (err: any) {
+        console.warn("[Guardian SOS Cancel] REST status sync error:", err?.message);
+      }
+    }
+
+    // 3. Reset local mobile state
+    cancelDistress();
+    try {
+      Vibration.vibrate([0, 80, 80, 80]);
+    } catch {}
+    const noticeText =
+      status === "RESOLVED"
+        ? `🛡️ Emergency SOS #${targetIncId || "Active"} safely marked RESOLVED.`
+        : `⚠️ Emergency SOS #${targetIncId || "Active"} marked as FALSE ALARM.`;
+    setResolutionNotice(noticeText);
+    setTimeout(() => setResolutionNotice(null), 8000);
+  };
+
   // Handle Interactive Voice Calibration Recorder
   const handleStartVoiceCalibration = async () => {
     await twoTierDistressPipeline.pauseNativeSpotter('CALIBRATING', 200);

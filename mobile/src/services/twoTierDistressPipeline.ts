@@ -480,9 +480,9 @@ class TwoTierDistressPipeline {
    * Evaluates Speaker Biometrics (Cosine Similarity >= 0.72) to reject bystander false alarms.
    */
   public async handleWakeWordSpotterEvent(
-    wakeWord: string = 'Help Me',
-    isOwnerUtterance: boolean = true,
-  ): Promise<void> {
+      wakeWord: string = 'Help Me',
+      isOwnerUtterance: boolean = true,
+    ): Promise<void> {
     if (!this.isRunning) this.startPipeline();
 
     // Trigger openWakeWord feature predictor
