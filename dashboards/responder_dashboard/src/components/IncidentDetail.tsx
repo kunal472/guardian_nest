@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   AlertOctagon,
   BatteryWarning,
@@ -101,13 +101,24 @@ export const IncidentDetail: React.FC<IncidentDetailProps> = ({
 
   const getAudioSrc = (url?: string | null) => {
     if (!url) return '';
-    if (url.startsWith('http') || url.startsWith('blob:') || url.startsWith('data:')) return url;
+    // Skip raw s3:// placeholder schemes that cannot be played directly
+    if (url.startsWith('s3://')) return '';
+    if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('blob:') || url.startsWith('data:')) return url;
     const backendHost =
       typeof window !== 'undefined' && window.location.hostname !== 'localhost'
         ? `http://${window.location.hostname}:3000`
         : 'http://localhost:3000';
     return `${backendHost}${url.startsWith('/') ? '' : '/'}${url}`;
   };
+
+  useEffect(() => {
+    if (audioRef.current) {
+      audioRef.current.load();
+    }
+    setIsPlayingAudio(false);
+    setAudioCurrentTime(0);
+    setAudioProgress(0);
+  }, [incident?.evidenceAudioUrl]);
 
   const playSynthesizedDistressTone = () => {
     try {
@@ -140,7 +151,8 @@ export const IncidentDetail: React.FC<IncidentDetailProps> = ({
   };
 
   const toggleAudioPlay = () => {
-    if (audioRef.current && incident?.evidenceAudioUrl) {
+    const audioSrc = getAudioSrc(incident?.evidenceAudioUrl);
+    if (audioRef.current && audioSrc) {
       if (isPlayingAudio) {
         audioRef.current.pause();
         setIsPlayingAudio(false);
@@ -324,8 +336,12 @@ export const IncidentDetail: React.FC<IncidentDetailProps> = ({
               <div style={{ fontSize: '13px', fontWeight: '700', color: '#f8fafc' }}>
                 30s Distress Audio Buffer (Encrypted Vault)
               </div>
-              <div style={{ fontSize: '11px', color: '#94a3b8' }}>
-                {incident.evidenceAudioUrl ? `Vault Asset: ${incident.evidenceAudioUrl.split('/').pop()}` : 'AES-256 Encrypted Secure Audio Channel'}
+              <div style={{ fontSize: '11px', color: incident.evidenceAudioUrl ? '#6ee7b7' : '#94a3b8' }}>
+                {incident.evidenceAudioUrl
+                  ? `🟢 Vault Asset: ${incident.evidenceAudioUrl.split('/').pop()}`
+                  : incident.status === 'ACTIVE'
+                    ? '🎙️ Capturing 30s Audio on Victim Device...'
+                    : 'AES-256 Encrypted Secure Audio Channel'}
               </div>
             </div>
           </div>

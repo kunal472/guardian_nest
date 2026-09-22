@@ -141,9 +141,24 @@ export const App: React.FC = () => {
       );
     };
 
+    const handleEvidenceUploaded = (payload: any) => {
+      const incId = payload?.incidentId || payload?.id;
+      const evidenceAudioUrl = payload?.evidenceAudioUrl;
+      if (!incId || !evidenceAudioUrl) return;
+
+      logger.socket(`Incident #${incId} audio evidence updated: ${evidenceAudioUrl}`);
+      setIncidents((prev) =>
+        prev.map((inc) => (inc.id === incId ? { ...inc, evidenceAudioUrl } : inc)),
+      );
+      setSelectedIncident((prev) =>
+        prev && prev.id === incId ? { ...prev, evidenceAudioUrl } : prev,
+      );
+    };
+
     socket.on('responder:status_changed', handleStatusUpdateEvent);
     socket.on('incident:status_changed', handleStatusUpdateEvent);
     socket.on('events.responder.status_change', handleStatusUpdateEvent);
+    socket.on('incident:evidence_uploaded', handleEvidenceUploaded);
     socket.on('incident:updated', (updated: Incident) => {
       if (!updated?.id) return;
       logger.socket(`Incident #${updated.id} full payload updated (${updated.status})`);
@@ -164,6 +179,7 @@ export const App: React.FC = () => {
       socket.off('responder:status_changed', handleStatusUpdateEvent);
       socket.off('incident:status_changed', handleStatusUpdateEvent);
       socket.off('events.responder.status_change', handleStatusUpdateEvent);
+      socket.off('incident:evidence_uploaded', handleEvidenceUploaded);
       socket.off('incident:updated');
     };
   }, [token]);

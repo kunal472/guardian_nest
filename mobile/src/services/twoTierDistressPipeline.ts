@@ -19,6 +19,8 @@ import { logger } from '../utils/logger';
 
 export type Tier1TriggerType = 'NONE' | 'YAMNET_SCREAM' | 'OPEN_WAKE_WORD' | 'WEBSPEECH_ASR';
 export type Tier2Status = 'idle' | 'transcribing' | 'intent_verifying' | 'escalated' | 'rejected';
+export type ScreamSensitivity = 'LOUD_ONLY' | 'MEDIUM' | 'SENSITIVE';
+export type WakeWordSensitivity = 'STRICT' | 'BALANCED' | 'SENSITIVE';
 
 export interface PipelineTelemetry {
   isPipelineActive: boolean;
@@ -33,6 +35,10 @@ export interface PipelineTelemetry {
   speakerBiometrics: VerificationResult | null;
   liveBiometricScore?: number; // 0 - 100%
   ambientNoiseDbfs?: number; // Ambient background noise floor
+  screamSensitivity?: ScreamSensitivity;
+  wakeWordSensitivity?: WakeWordSensitivity;
+  screamThresholdDbfs?: number;
+  speechThresholdDbfs?: number;
   ringBufferFill: number; // 0 - 100%
   ringBufferSeconds: number; // 0.0 - 5.0s
   liveAudioEnergyPercent: number; // 0 - 100% live microphone amplitude
@@ -75,12 +81,19 @@ class TwoTierDistressPipeline {
   private isTriggerDebounced: boolean = false;
   private isSosActive: boolean = false;
   private sustainedHighEnergyFrames: number = 0;
+  private sustainedSpeechFrames: number = 0;
   private liveMeteringDbfs: number | null = null;
   private ambientNoiseFloorDbfs: number = -55.0;
   private calibrationFramesCount: number = 0;
   private lastVocalBurstTime: number = 0;
   private vocalBurstCount: number = 0;
   private inAcousticValley: boolean = true;
+
+  private screamSensitivityLevel: ScreamSensitivity = 'MEDIUM';
+  private wakeWordSensitivityLevel: WakeWordSensitivity = 'BALANCED';
+  private screamDeltaDbfs: number = 12.0;
+  private screamMinFrames: number = 4;
+  private speechDeltaDbfs: number = 6.0;
 
   private telemetry: PipelineTelemetry = {
     isPipelineActive: true,
@@ -95,6 +108,10 @@ class TwoTierDistressPipeline {
     speakerBiometrics: null,
     liveBiometricScore: 85,
     ambientNoiseDbfs: -55.0,
+    screamSensitivity: 'MEDIUM',
+    wakeWordSensitivity: 'BALANCED',
+    screamThresholdDbfs: -15.0,
+    speechThresholdDbfs: -24.0,
     ringBufferFill: 0,
     ringBufferSeconds: 0,
     liveAudioEnergyPercent: 8,
@@ -104,10 +121,57 @@ class TwoTierDistressPipeline {
   };
 
   private yamnetThreshold: number = 0.80;
-  private openWakeWordThreshold: number = 0.82;
+  private openWakeWordThreshold: number = 0.78;
 
   constructor() {
     this.ringBuffer = new AudioRingBuffer(16000, 5); // 16kHz, 5s capacity = 80,000 samples
+  }
+
+  public setScreamSensitivity(level: ScreamSensitivity): void {
+    this.screamSensitivityLevel = level;
+    if (level === 'LOUD_ONLY') {
+      this.yamnetThreshold = 0.88;
+      this.screamDeltaDbfs = 18.0;
+      this.screamMinFrames = 5;
+    } else if (level === 'MEDIUM') {
+      this.yamnetThreshold = 0.80;
+      this.screamDeltaDbfs = 12.0;
+      this.screamMinFrames = 4;
+    } else {
+      // SENSITIVE
+      this.yamnetThreshold = 0.70;
+      this.screamDeltaDbfs = 6.0;
+      this.screamMinFrames = 3;
+    }
+    this.telemetry.screamSensitivity = level;
+    this.emitState();
+    logger.info(`[TwoTierPipeline] Scream Sensitivity updated: ${level} (Thresh=${this.yamnetThreshold.toFixed(2)}, Delta=+${this.screamDeltaDbfs}dB)`);
+  }
+
+  public getScreamSensitivity(): ScreamSensitivity {
+    return this.screamSensitivityLevel;
+  }
+
+  public setWakeWordSensitivity(level: WakeWordSensitivity): void {
+    this.wakeWordSensitivityLevel = level;
+    if (level === 'STRICT') {
+      this.openWakeWordThreshold = 0.88;
+      this.speechDeltaDbfs = 9.0;
+    } else if (level === 'BALANCED') {
+      this.openWakeWordThreshold = 0.78;
+      this.speechDeltaDbfs = 5.0;
+    } else {
+      // SENSITIVE
+      this.openWakeWordThreshold = 0.68;
+      this.speechDeltaDbfs = 2.5;
+    }
+    this.telemetry.wakeWordSensitivity = level;
+    this.emitState();
+    logger.info(`[TwoTierPipeline] WakeWord Sensitivity updated: ${level} (Thresh=${this.openWakeWordThreshold.toFixed(2)}, Delta=+${this.speechDeltaDbfs}dB)`);
+  }
+
+  public getWakeWordSensitivity(): WakeWordSensitivity {
+    return this.wakeWordSensitivityLevel;
   }
 
   public setDynamicThresholds(yamnetFloor?: number, wakeWordFloor?: number): void {
@@ -137,6 +201,7 @@ class TwoTierDistressPipeline {
     this.isSosActive = active;
     if (active) {
       this.sustainedHighEnergyFrames = 0;
+      this.sustainedSpeechFrames = 0;
       this.vocalBurstCount = 0;
     }
   }
@@ -220,46 +285,57 @@ class TwoTierDistressPipeline {
         }
       }
 
-      // Dynamic adaptive thresholds based on ambient room noise (requires high SNR above fan/chatter)
-      const speechFloorDbfs = Math.max(-24.0, this.ambientNoiseFloorDbfs + 8.0);
-      const screamFloorDbfs = Math.max(-12.0, this.ambientNoiseFloorDbfs + 15.0);
+      // Dynamic adaptive thresholds based on ambient room noise and configured sensitivity level
+      const speechFloorDbfs = Math.max(-28.0, this.ambientNoiseFloorDbfs + this.speechDeltaDbfs);
+      const screamFloorDbfs = Math.max(-18.0, this.ambientNoiseFloorDbfs + this.screamDeltaDbfs);
 
       // Calculate live energy percentage (0 to 100%) from dBFS (-60 to 0)
       const liveEnergyPercent = liveMeteringDbfs !== null
         ? Math.min(100, Math.max(3, Math.round(((liveMeteringDbfs + 60) / 60) * 100)))
         : Math.round(5 + Math.random() * 8);
 
-      // Track continuous high amplitude for Scream Detector (must be >= 500ms above scream floor)
+      // Track continuous high amplitude for Scream Detector (must be >= screamMinFrames frames)
       if (liveMeteringDbfs !== null && liveMeteringDbfs >= screamFloorDbfs) {
         this.sustainedHighEnergyFrames++;
       } else {
         this.sustainedHighEnergyFrames = Math.max(0, this.sustainedHighEnergyFrames - 2);
       }
 
-      // Track Syllabic Cadence for Spoken Phrases (requires speech energy with distinct syllable pauses)
-      if (now - this.lastVocalBurstTime > 1200) {
-        this.vocalBurstCount = 0;
-        this.inAcousticValley = true;
-      }
-
-      let detectedCadence = false;
+      // Track Vocal Phrase / Cadence Activity for Spoken Keyword ("Help Me" / "Emergency")
+      let detectedSpokenDistress = false;
       let cadenceBurstMs = 0;
 
       if (liveMeteringDbfs !== null) {
+        if (liveMeteringDbfs >= speechFloorDbfs) {
+          this.sustainedSpeechFrames++;
+          // If speech is sustained for >= 250ms (3 frames) up to 2.0s without screaming
+          if (this.sustainedSpeechFrames >= 3 && this.sustainedSpeechFrames <= 20) {
+            detectedSpokenDistress = true;
+          }
+        } else {
+          this.sustainedSpeechFrames = Math.max(0, this.sustainedSpeechFrames - 1);
+        }
+
+        // Syllabic 2-pulse cadence detection
+        if (now - this.lastVocalBurstTime > 1500) {
+          this.vocalBurstCount = 0;
+          this.inAcousticValley = true;
+        }
+
         if (liveMeteringDbfs < speechFloorDbfs) {
           this.inAcousticValley = true;
         } else if (liveMeteringDbfs >= speechFloorDbfs && liveMeteringDbfs < screamFloorDbfs) {
           if (this.inAcousticValley) {
             this.inAcousticValley = false;
             const timeSinceLastBurst = now - this.lastVocalBurstTime;
-            if (this.vocalBurstCount === 0 || timeSinceLastBurst > 1200) {
+            if (this.vocalBurstCount === 0 || timeSinceLastBurst > 1500) {
               this.vocalBurstCount = 1;
               this.lastVocalBurstTime = now;
-            } else if (this.vocalBurstCount === 1 && timeSinceLastBurst >= 220 && timeSinceLastBurst <= 900) {
+            } else if (this.vocalBurstCount >= 1 && timeSinceLastBurst >= 180 && timeSinceLastBurst <= 1200) {
               this.vocalBurstCount = 2;
               this.lastVocalBurstTime = now;
               cadenceBurstMs = timeSinceLastBurst;
-              detectedCadence = true;
+              detectedSpokenDistress = true;
             }
           }
         }
@@ -284,6 +360,8 @@ class TwoTierDistressPipeline {
       this.telemetry.liveAudioEnergyPercent = liveEnergyPercent;
       this.telemetry.liveDbfs = liveMeteringDbfs ?? -55.0;
       this.telemetry.ambientNoiseDbfs = Number(this.ambientNoiseFloorDbfs.toFixed(1));
+      this.telemetry.screamThresholdDbfs = Number(screamFloorDbfs.toFixed(1));
+      this.telemetry.speechThresholdDbfs = Number(speechFloorDbfs.toFixed(1));
       this.emitState();
 
       // Guard: Skip triggering if an SOS is already active or during debounce lockout
@@ -291,8 +369,8 @@ class TwoTierDistressPipeline {
         return;
       }
 
-      // Tier 1 Trigger A: Real-Time Acoustic Scream Spotter (>= 5 consecutive 100ms frames >= screamFloorDbfs)
-      if (this.sustainedHighEnergyFrames >= 5 && liveMeteringDbfs !== null) {
+      // Tier 1 Trigger A: Real-Time Acoustic Scream Spotter (>= screamMinFrames consecutive frames >= screamFloorDbfs)
+      if (this.sustainedHighEnergyFrames >= this.screamMinFrames && liveMeteringDbfs !== null) {
         const calculatedConfidence = Math.min(0.99, Math.max(0.70, 0.78 + (liveMeteringDbfs - screamFloorDbfs) / 15));
         if (calculatedConfidence >= this.yamnetThreshold) {
           console.warn(
@@ -300,6 +378,7 @@ class TwoTierDistressPipeline {
           );
           this.isTriggerDebounced = true;
           this.sustainedHighEnergyFrames = 0;
+          this.sustainedSpeechFrames = 0;
           this.vocalBurstCount = 0;
           this.handleScreamSpotterEvent(calculatedConfidence, 'Scream');
           setTimeout(() => {
@@ -308,14 +387,15 @@ class TwoTierDistressPipeline {
         }
       }
       // Tier 1 Trigger B: Adaptive Spoken Distress Cadence ("Help Me" / "Emergency")
-      else if (detectedCadence && liveMeteringDbfs !== null && liveMeteringDbfs >= speechFloorDbfs + 6.0) {
-        const calculatedConfidence = Math.min(0.98, Math.max(0.70, 0.75 + (liveMeteringDbfs - speechFloorDbfs) / 15));
+      else if (detectedSpokenDistress && liveMeteringDbfs !== null && liveMeteringDbfs >= speechFloorDbfs) {
+        const calculatedConfidence = Math.min(0.98, Math.max(0.68, 0.74 + (liveMeteringDbfs - speechFloorDbfs) / 15));
         if (calculatedConfidence >= this.openWakeWordThreshold) {
           console.warn(
-            `[TwoTierPipeline] 🗣️ SPOKEN DISTRESS CADENCE DETECTED: ${liveMeteringDbfs.toFixed(1)} dBFS (2-pulse vocal cadence over ${cadenceBurstMs}ms, ${(calculatedConfidence * 100).toFixed(0)}% confidence)`,
+            `[TwoTierPipeline] 🗣️ SPOKEN DISTRESS PHRASE DETECTED: ${liveMeteringDbfs.toFixed(1)} dBFS (${(calculatedConfidence * 100).toFixed(0)}% confidence, SpeechFrames=${this.sustainedSpeechFrames})`,
           );
           this.isTriggerDebounced = true;
           this.sustainedHighEnergyFrames = 0;
+          this.sustainedSpeechFrames = 0;
           this.vocalBurstCount = 0;
           this.handleWakeWordCadenceEvent('Help Me', calculatedConfidence);
           setTimeout(() => {
@@ -448,16 +528,10 @@ class TwoTierDistressPipeline {
     const bioResult = speakerBiometricsService.verifySpeaker(embedding);
 
     const matchPercent = Math.round(bioResult.similarity * 100);
-    const matchPercent = Math.round(bioResult.similarity * 100);
     this.telemetry.speakerBiometrics = bioResult;
-    this.telemetry.liveBiometricScore = matchPercent;
     this.telemetry.liveBiometricScore = matchPercent;
     this.emitState();
 
-    // Confidence Product Scoring: allows whispered/quiet distress when keyword match is high (confidence >= 0.80 and similarity >= 0.55)
-    const isPassing = bioResult.isMatch || (confidence >= 0.80 && bioResult.similarity >= 0.55);
-
-    if (!isPassing) {
     // Confidence Product Scoring: allows whispered/quiet distress when keyword match is high (confidence >= 0.80 and similarity >= 0.55)
     const isPassing = bioResult.isMatch || (confidence >= 0.80 && bioResult.similarity >= 0.55);
 

@@ -451,55 +451,6 @@ export default function App() {
     setTimeout(() => setResolutionNotice(null), 8000);
   };
 
-  const handlePromptCancelSos = () => {
-    setShowCancelModal(true);
-  };
-
-  const handleResolveSos = async (status: "RESOLVED" | "FALSE_ALARM") => {
-    setShowCancelModal(false);
-    const targetIncId = incidentIdRef.current || incidentId;
-
-    if (targetIncId) {
-      // 1. Emit status change over Socket.IO
-      if (socketRef.current?.connected) {
-        socketRef.current.emit("responder:status_change", {
-          incidentId: targetIncId,
-          status,
-        });
-        socketRef.current.emit("incident:status_change", {
-          incidentId: targetIncId,
-          status,
-        });
-      }
-
-      // 2. Transmit PATCH update to REST backend
-      try {
-        await fetch(`${backendUrl}/api/incidents/${targetIncId}/status`, {
-          method: "PATCH",
-          headers: {
-            "Content-Type": "application/json",
-            ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
-          },
-          body: JSON.stringify({ status }),
-        });
-      } catch (err: any) {
-        console.warn("[Guardian SOS Cancel] REST status sync error:", err?.message);
-      }
-    }
-
-    // 3. Reset local mobile state
-    cancelDistress();
-    try {
-      Vibration.vibrate([0, 80, 80, 80]);
-    } catch {}
-    const noticeText =
-      status === "RESOLVED"
-        ? `🛡️ Emergency SOS #${targetIncId || "Active"} safely marked RESOLVED.`
-        : `⚠️ Emergency SOS #${targetIncId || "Active"} marked as FALSE ALARM.`;
-    setResolutionNotice(noticeText);
-    setTimeout(() => setResolutionNotice(null), 8000);
-  };
-
   // Handle Interactive Voice Calibration Recorder
   const handleStartVoiceCalibration = async () => {
     await twoTierDistressPipeline.pauseNativeSpotter('CALIBRATING', 200);
@@ -624,10 +575,12 @@ export default function App() {
     socket.on("distress:acknowledged", (data: any) => {
       logger.info("Distress acknowledged by server:", data);
       setIncidentId(data.incidentId);
+      hardwareAudioVaultService.setIncidentId(data.incidentId);
       hardwareAudioVaultService.startEvidenceCapture(
         data.incidentId,
         30,
         backendUrl,
+        authToken || undefined,
       );
     });
 
@@ -995,7 +948,6 @@ export default function App() {
         lng: currentLng,
         triggerType: type,
         batteryLevel: Math.round(batteryLevel),
-        evidenceAudioUrl: `s3://guardian-vault/${Date.now()}.m4a`,
       });
     } else {
       setIncidentId(`inc_offline_${Date.now()}`);
@@ -1013,7 +965,6 @@ export default function App() {
           lng: currentLng,
           triggerType: type,
           batteryLevel: Math.round(batteryLevel),
-          evidenceAudioUrl: `s3://guardian-vault/${Date.now()}.m4a`,
         }),
       }).catch((e) => console.log("[Distress REST Fallback]:", e?.message));
 
@@ -1556,6 +1507,70 @@ export default function App() {
                     },
                   ]}
                 />
+              </View>
+            </View>
+
+            {/* Configurable Scream Loudness Threshold Control */}
+            <View style={{ marginTop: 8 }}>
+              <View style={styles.rowBetween}>
+                <Text style={styles.metaLabel}>Scream Loudness Sensitivity:</Text>
+                <Text style={[styles.metaValue, { color: "#f87171", fontSize: 11 }]}>
+                  Floor: {pipelineTelemetry.screamThresholdDbfs ?? -15.0} dBFS
+                </Text>
+              </View>
+              <View style={styles.buttonRowResponsive}>
+                {(["LOUD_ONLY", "MEDIUM", "SENSITIVE"] as const).map((lvl) => (
+                  <TouchableOpacity
+                    key={lvl}
+                    style={[
+                      styles.mlPill,
+                      (pipelineTelemetry.screamSensitivity || "MEDIUM") === lvl && styles.mlPillActiveRed,
+                    ]}
+                    activeOpacity={0.8}
+                    onPress={() => twoTierDistressPipeline.setScreamSensitivity(lvl)}
+                  >
+                    <Text
+                      style={[
+                        styles.mlPillText,
+                        (pipelineTelemetry.screamSensitivity || "MEDIUM") === lvl && styles.mlPillTextActiveRed,
+                      ]}
+                    >
+                      {lvl === "LOUD_ONLY" ? "LOUD (-8dB)" : lvl === "MEDIUM" ? "MED (-15dB)" : "SENSITIVE"}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+
+            {/* Configurable WakeWord Phrase Sensitivity Control */}
+            <View style={{ marginTop: 8 }}>
+              <View style={styles.rowBetween}>
+                <Text style={styles.metaLabel}>WakeWord Voice Sensitivity:</Text>
+                <Text style={[styles.metaValue, { color: "#c084fc", fontSize: 11 }]}>
+                  Floor: {pipelineTelemetry.speechThresholdDbfs ?? -24.0} dBFS
+                </Text>
+              </View>
+              <View style={styles.buttonRowResponsive}>
+                {(["STRICT", "BALANCED", "SENSITIVE"] as const).map((lvl) => (
+                  <TouchableOpacity
+                    key={lvl}
+                    style={[
+                      styles.mlPill,
+                      (pipelineTelemetry.wakeWordSensitivity || "BALANCED") === lvl && styles.mlPillActive,
+                    ]}
+                    activeOpacity={0.8}
+                    onPress={() => twoTierDistressPipeline.setWakeWordSensitivity(lvl)}
+                  >
+                    <Text
+                      style={[
+                        styles.mlPillText,
+                        (pipelineTelemetry.wakeWordSensitivity || "BALANCED") === lvl && styles.mlPillTextActive,
+                      ]}
+                    >
+                      {lvl === "STRICT" ? "STRICT (+9dB)" : lvl === "BALANCED" ? "BALANCED" : "SENSITIVE (+2.5dB)"}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
               </View>
             </View>
           </View>
@@ -2778,6 +2793,10 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(168, 85, 247, 0.25)",
     borderColor: "#a855f7",
   },
+  mlPillActiveRed: {
+    backgroundColor: "rgba(239, 68, 68, 0.25)",
+    borderColor: "#ef4444",
+  },
   mlPillText: {
     fontSize: 11,
     fontWeight: "700",
@@ -2785,6 +2804,9 @@ const styles = StyleSheet.create({
   },
   mlPillTextActive: {
     color: "#d8b4fe",
+  },
+  mlPillTextActiveRed: {
+    color: "#fca5a5",
   },
   simPill: {
     paddingVertical: 7,

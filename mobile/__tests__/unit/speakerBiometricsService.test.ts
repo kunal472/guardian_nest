@@ -30,7 +30,7 @@ describe('SpeakerBiometricsService Unit Tests', () => {
 
   it('should authenticate owner voice vector with high cosine similarity', () => {
     const profile = speakerBiometricsService.getProfile();
-    expect(profile).not.null;
+    expect(profile).not.toBeNull();
 
     // Test with the exact profile embedding
     const verification = speakerBiometricsService.verifySpeaker(profile!.embeddingVector);

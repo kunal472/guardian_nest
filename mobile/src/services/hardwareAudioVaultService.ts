@@ -84,6 +84,13 @@ class HardwareAudioVaultService {
     }
   }
 
+  public setIncidentId(incidentId: string): void {
+    if (incidentId && incidentId.trim().length > 0) {
+      this.currentIncidentId = incidentId.trim();
+      console.log(`[HardwareAudioVault] 🎯 Incident ID attached: ${this.currentIncidentId}`);
+    }
+  }
+
   public isRecording(): boolean {
     return this.state.status === "recording";
   }
@@ -107,14 +114,19 @@ class HardwareAudioVaultService {
     backendUrl?: string,
     authToken?: string | null,
   ): Promise<void> {
-    if (this.state.status === "recording") return;
-
-    this.currentIncidentId = incidentId || null;
+    if (incidentId) {
+      this.currentIncidentId = incidentId;
+    }
     if (backendUrl && backendUrl.trim().length > 0) {
       this.activeBackendUrl = backendUrl.trim().replace(/\/+$/, '');
     }
     if (authToken !== undefined) {
       this.activeAuthToken = authToken || undefined;
+    }
+
+    if (this.state.status === "recording") {
+      console.log(`[HardwareAudioVault] 🎙️ Ongoing audio recording updated with Incident ID: ${this.currentIncidentId}`);
+      return;
     }
 
     this.state = {
