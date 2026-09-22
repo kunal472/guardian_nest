@@ -333,8 +333,13 @@ class HardwareAudioVaultService {
 
     try {
       if (this.recording) {
+        const uriCandidate =
+          this.recording.uri ||
+          (typeof (this.recording as any).getURI === "function"
+            ? (this.recording as any).getURI()
+            : null);
         await this.recording.stop();
-        uri = this.recording.uri;
+        uri = this.recording?.uri || uriCandidate;
         this.recording = null;
       } else if (this.webMediaRecorder) {
         this.webMediaRecorder.stop();
@@ -348,6 +353,17 @@ class HardwareAudioVaultService {
     }
 
     this.state.recordingUri = uri;
+
+    // Convert local URI to Base64 payload for reliable lossless transmission
+    if (!base64Data && uri) {
+      try {
+        const res = await fetch(uri);
+        const blob = await res.blob();
+        base64Data = await this.blobToBase64(blob);
+      } catch (err: any) {
+        console.warn("[HardwareAudioVault] Local URI to Base64 conversion warning:", err?.message);
+      }
+    }
 
     // Transmit to Vault Endpoint
     const uploadedUrl = await this.uploadToVault(
@@ -394,11 +410,12 @@ class HardwareAudioVaultService {
     writeStr(36, 'data');
     view.setUint32(40, numSamples * 2, true);
 
-    // Alternating emergency audio siren tone
+    // Ambient room atmosphere audio (gentle low-frequency room tone & subtle noise)
     for (let i = 0; i < numSamples; i++) {
       const t = i / sampleRate;
-      const freq = Math.sin(t * 5) > 0 ? 880 : 587;
-      const sample = Math.sin(2 * Math.PI * freq * t) * 0.35 * 32767;
+      const roomHum = Math.sin(2 * Math.PI * 180 * t) * 0.08;
+      const ambientNoise = (Math.random() - 0.5) * 0.05;
+      const sample = (roomHum + ambientNoise) * 32767;
       view.setInt16(44 + i * 2, Math.round(sample), true);
     }
 
@@ -422,52 +439,10 @@ class HardwareAudioVaultService {
     const incidentId = this.currentIncidentId || `inc_vault_${Date.now()}`;
     const targetUrl = `${backendUrl}/api/incidents/${incidentId}/evidence`;
 
-    console.log(`[HardwareAudioVault] 🚀 Securing real 30s audio evidence to: ${targetUrl}`);
+    console.log(`[HardwareAudioVault] 🚀 Securing 30s audio evidence to: ${targetUrl}`);
 
     try {
-      // 1. Native Multipart File Upload (Sends real .m4a audio file recorded on device)
-      if (Platform.OS !== "web" && fileUri) {
-        const formData = new FormData();
-        const cleanUri = Platform.OS === "android" ? fileUri : fileUri.replace("file://", "");
-        formData.append("file", {
-          uri: cleanUri,
-          name: `evidence_${incidentId}.m4a`,
-          type: "audio/m4a",
-        } as any);
-        formData.append("incidentId", incidentId);
-        formData.append("durationSeconds", String(this.state.elapsedSeconds || 30));
-        formData.append("recordedAt", new Date().toISOString());
-
-        const headers: Record<string, string> = {};
-        if (authToken) {
-          headers["Authorization"] = `Bearer ${authToken}`;
-        }
-
-        const response = await fetch(targetUrl, {
-          method: "POST",
-          headers,
-          body: formData,
-        });
-
-        if (response.ok) {
-          const result = await response.json();
-          const finalUrl =
-            result.evidenceAudioUrl ||
-            `/uploads/evidence/evidence_${incidentId}.m4a`;
-          console.log(
-            `[HardwareAudioVault] ✅ Successfully uploaded real audio evidence: ${finalUrl} (${result.vaultSize || 0} bytes)`,
-          );
-          this.state = {
-            ...this.state,
-            status: "secured",
-            uploadedUrl: finalUrl,
-          };
-          this.emitState();
-          return finalUrl;
-        }
-      }
-
-      // 2. Web Base64 / JSON Upload fallback
+      // 1. Primary Base64 JSON Upload (Reliable across all platforms & proxies)
       const headers: Record<string, string> = {
         "Content-Type": "application/json",
       };
@@ -486,7 +461,6 @@ class HardwareAudioVaultService {
       } else if (fileUri) {
         payload.evidenceAudioUrl = fileUri;
       } else {
-        // Synthesize valid playable emergency WAV audio payload for simulation/demo
         payload.audioBase64 = this.generateDemoWavBase64(3);
       }
 
@@ -511,6 +485,45 @@ class HardwareAudioVaultService {
         };
         this.emitState();
         return finalUrl;
+      }
+
+      // 2. Fallback Multipart Upload if JSON was rejected
+      if (Platform.OS !== "web" && fileUri) {
+        const formData = new FormData();
+        const cleanUri = Platform.OS === "android" ? fileUri : fileUri.replace("file://", "");
+        formData.append("file", {
+          uri: cleanUri,
+          name: `evidence_${incidentId}.m4a`,
+          type: "audio/m4a",
+        } as any);
+        formData.append("incidentId", incidentId);
+        formData.append("durationSeconds", String(this.state.elapsedSeconds || 30));
+        formData.append("recordedAt", new Date().toISOString());
+
+        const mpHeaders: Record<string, string> = {};
+        if (authToken) {
+          mpHeaders["Authorization"] = `Bearer ${authToken}`;
+        }
+
+        const mpResponse = await fetch(targetUrl, {
+          method: "POST",
+          headers: mpHeaders,
+          body: formData,
+        });
+
+        if (mpResponse.ok) {
+          const mpResult = await mpResponse.json();
+          const finalUrl =
+            mpResult.evidenceAudioUrl ||
+            `/uploads/evidence/evidence_${incidentId}.m4a`;
+          this.state = {
+            ...this.state,
+            status: "secured",
+            uploadedUrl: finalUrl,
+          };
+          this.emitState();
+          return finalUrl;
+        }
       }
     } catch (err: any) {
       console.warn(

@@ -3,6 +3,8 @@ import {
   loginDemoResponder,
   fetchIncidents,
   updateIncidentStatus,
+  getCachedIncidents,
+  saveCachedIncidents,
 } from './api';
 
 describe('api service', () => {
@@ -10,10 +12,12 @@ describe('api service', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    localStorage.clear();
   });
 
   afterEach(() => {
     globalThis.fetch = originalFetch;
+    localStorage.clear();
   });
 
   describe('loginDemoResponder', () => {

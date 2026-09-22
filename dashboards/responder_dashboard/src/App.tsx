@@ -19,6 +19,8 @@ import {
   Incident,
   fetchIncidents,
   updateIncidentStatus,
+  getCachedIncidents,
+  saveCachedIncidents,
 } from './services/api';
 import { getSocket } from './services/socket';
 import { LiveAlertBanner } from './components/LiveAlertBanner';
@@ -44,8 +46,12 @@ export const App: React.FC = () => {
     return auth ? auth.token : '';
   });
   const [isConnected, setIsConnected] = useState<boolean>(false);
-  const [incidents, setIncidents] = useState<Incident[]>([]);
-  const [selectedIncident, setSelectedIncident] = useState<Incident | null>(null);
+  const [incidents, setIncidents] = useState<Incident[]>(() => getCachedIncidents());
+  const [selectedIncident, setSelectedIncident] = useState<Incident | null>(() => {
+    const cached = getCachedIncidents();
+    const active = cached.find((i) => i.status === 'ACTIVE') || cached[0] || null;
+    return active;
+  });
   const [liveCoordinates, setLiveCoordinates] = useState<{
     lat: number;
     lng: number;
@@ -53,12 +59,16 @@ export const App: React.FC = () => {
   } | null>(null);
   const [breadcrumbs, setBreadcrumbs] = useState<
     Array<{ lat: number; lng: number; batteryLevel?: number; loggedAt: string }>
-  >([]);
+  >(() => {
+    const cached = getCachedIncidents();
+    const active = cached.find((i) => i.status === 'ACTIVE') || cached[0];
+    return active?.locationLogs || [];
+  });
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [isAudioMuted, setIsAudioMuted] = useState<boolean>(() => audioChime.getMuted());
 
-  // Initialize Data when token is available
+  // Initialize Data when token is available or on component mount
   useEffect(() => {
     if (token) {
       loadIncidents(token);
@@ -66,16 +76,33 @@ export const App: React.FC = () => {
   }, [token]);
 
   const loadIncidents = async (authToken?: string) => {
-    const data = await fetchIncidents(authToken || token);
-    if (data && data.length > 0) {
-      setIncidents(data);
-      if (!selectedIncident) {
-        const active = data.find((i) => i.status === 'ACTIVE') || data[0];
-        setSelectedIncident(active);
-        if (active.locationLogs) {
-          setBreadcrumbs(active.locationLogs);
-        }
+    const activeToken = authToken || token || getStoredResponderAuth()?.token || '';
+    setIsLoading(true);
+    try {
+      const data = await fetchIncidents(activeToken);
+      if (data && data.length > 0) {
+        setIncidents(data);
+        saveCachedIncidents(data);
+        setSelectedIncident((prev) => {
+          if (!prev) {
+            const active = data.find((i) => i.status === 'ACTIVE') || data[0];
+            if (active?.locationLogs) {
+              setBreadcrumbs(active.locationLogs);
+            }
+            return active || null;
+          }
+          const updated = data.find((i) => i.id === prev.id);
+          if (updated) {
+            if (updated.locationLogs) {
+              setBreadcrumbs(updated.locationLogs);
+            }
+            return updated;
+          }
+          return prev;
+        });
       }
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -102,8 +129,15 @@ export const App: React.FC = () => {
     socket.on('incident:new', (newInc: Incident) => {
       logger.socket(`🚨 New Incident received #${newInc.id} (${newInc.triggerType})`);
       audioChime.playEmergencyDispatchAlert();
-      setIncidents((prev) => [newInc, ...prev.filter((i) => i.id !== newInc.id)]);
+      setIncidents((prev) => {
+        const updated = [newInc, ...prev.filter((i) => i.id !== newInc.id)];
+        saveCachedIncidents(updated);
+        return updated;
+      });
       setSelectedIncident(newInc);
+      if (newInc.locationLogs) {
+        setBreadcrumbs(newInc.locationLogs);
+      }
     });
 
     // Listen for live GPS coordinate updates (1 ping/sec throttled)
@@ -133,9 +167,11 @@ export const App: React.FC = () => {
       if (!incId || !status) return;
 
       logger.socket(`Incident #${incId} status updated to ${status}`);
-      setIncidents((prev) =>
-        prev.map((inc) => (inc.id === incId ? { ...inc, status } : inc)),
-      );
+      setIncidents((prev) => {
+        const updated = prev.map((inc) => (inc.id === incId ? { ...inc, status } : inc));
+        saveCachedIncidents(updated);
+        return updated;
+      });
       setSelectedIncident((prev) =>
         prev && prev.id === incId ? { ...prev, status } : prev,
       );
@@ -147,9 +183,11 @@ export const App: React.FC = () => {
       if (!incId || !evidenceAudioUrl) return;
 
       logger.socket(`Incident #${incId} audio evidence updated: ${evidenceAudioUrl}`);
-      setIncidents((prev) =>
-        prev.map((inc) => (inc.id === incId ? { ...inc, evidenceAudioUrl } : inc)),
-      );
+      setIncidents((prev) => {
+        const updated = prev.map((inc) => (inc.id === incId ? { ...inc, evidenceAudioUrl } : inc));
+        saveCachedIncidents(updated);
+        return updated;
+      });
       setSelectedIncident((prev) =>
         prev && prev.id === incId ? { ...prev, evidenceAudioUrl } : prev,
       );
@@ -162,9 +200,11 @@ export const App: React.FC = () => {
     socket.on('incident:updated', (updated: Incident) => {
       if (!updated?.id) return;
       logger.socket(`Incident #${updated.id} full payload updated (${updated.status})`);
-      setIncidents((prev) =>
-        prev.map((inc) => (inc.id === updated.id ? { ...inc, ...updated } : inc)),
-      );
+      setIncidents((prev) => {
+        const updatedList = prev.map((inc) => (inc.id === updated.id ? { ...inc, ...updated } : inc));
+        saveCachedIncidents(updatedList);
+        return updatedList;
+      });
       setSelectedIncident((prev) =>
         prev && prev.id === updated.id ? { ...prev, ...updated } : prev,
       );
@@ -244,6 +284,7 @@ export const App: React.FC = () => {
     setToken('');
     setIncidents([]);
     setSelectedIncident(null);
+    localStorage.removeItem('guardian_responder_cached_incidents');
   };
 
   if (!currentUser || !token) {

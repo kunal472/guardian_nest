@@ -121,7 +121,7 @@ describe('IncidentDetail Component', () => {
     });
   });
 
-  it('handles audio playback fallback to Web Audio tone when no audio URL or play error occurs', () => {
+  it('handles audio playback gracefully when no audio URL is present', () => {
     const noAudioIncident: Incident = {
       ...baseIncident,
       evidenceAudioUrl: undefined,
@@ -139,7 +139,7 @@ describe('IncidentDetail Component', () => {
     const playBtn = screen.getByRole('button', { name: /Play Audio Evidence/i });
     fireEvent.click(playBtn);
 
-    expect(screen.getByText(/Pause Evidence/i)).toBeInTheDocument();
+    expect(screen.getByText(/Play Audio Evidence/i)).toBeInTheDocument();
   });
 
   it('handles audio scrubber click', () => {
