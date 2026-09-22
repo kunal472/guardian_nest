@@ -20,7 +20,7 @@ export class LocationLog {
   @Field(() => Int, { nullable: true })
   batteryLevel?: number | null;
 
-  @Field()
+  @Field(() => String)
   loggedAt: string;
 }
 
@@ -29,7 +29,7 @@ export class Incident {
   @Field(() => ID)
   id: string;
 
-  @Field()
+  @Field(() => String)
   userId: string;
 
   @Field(() => TriggerType)
@@ -38,19 +38,19 @@ export class Incident {
   @Field(() => IncidentStatus)
   status: IncidentStatus;
 
-  @Field()
+  @Field(() => String)
   startedAt: string;
 
-  @Field({ nullable: true })
+  @Field(() => String, { nullable: true })
   resolvedAt?: string | null;
 
-  @Field({ nullable: true })
+  @Field(() => String, { nullable: true })
   resolvedByUserId?: string | null;
 
   @Field(() => [LocationLog])
   locationLogs: LocationLog[];
 
-  @Field({ nullable: true })
+  @Field(() => String, { nullable: true })
   evidenceAudioUrl?: string | null;
 }
 
@@ -59,22 +59,22 @@ export class User {
   @Field(() => ID)
   id: string;
 
-  @Field()
+  @Field(() => String)
   phone: string;
 
-  @Field()
+  @Field(() => String)
   name: string;
 
   @Field(() => UserRole)
   role: UserRole;
 
-  @Field()
+  @Field(() => Boolean)
   isVolunteer: boolean;
 
   @Field(() => MlSensitivity)
   mlSensitivity: MlSensitivity;
 
-  @Field()
+  @Field(() => String)
   createdAt: string;
 
   @Field(() => [Incident])
@@ -98,7 +98,7 @@ export class SystemConfigModel {
   @Field(() => Int)
   deadmanTimeoutMins: number;
 
-  @Field()
+  @Field(() => String)
   updatedAt: string;
 }
 
