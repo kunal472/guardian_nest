@@ -152,24 +152,26 @@ export const IncidentDetail: React.FC<IncidentDetailProps> = ({
 
   const toggleAudioPlay = () => {
     const audioSrc = getAudioSrc(incident?.evidenceAudioUrl);
-    if (audioRef.current && audioSrc) {
+    if (!audioSrc) {
+      console.warn('[AudioEvidence] No audio evidence URL available yet.');
+      return;
+    }
+
+    if (audioRef.current) {
       if (isPlayingAudio) {
         audioRef.current.pause();
         setIsPlayingAudio(false);
       } else {
+        if (audioRef.current.ended) {
+          audioRef.current.currentTime = 0;
+        }
         audioRef.current
           .play()
           .then(() => setIsPlayingAudio(true))
           .catch((err: any) => {
-            console.warn('[AudioEvidence] HTML5 Audio play error, playing synthesized distress tone:', err);
-            playSynthesizedDistressTone();
+            console.warn('[AudioEvidence] HTML5 Audio play error:', err);
+            setIsPlayingAudio(false);
           });
-      }
-    } else {
-      if (isPlayingAudio) {
-        setIsPlayingAudio(false);
-      } else {
-        playSynthesizedDistressTone();
       }
     }
   };
@@ -421,7 +423,9 @@ export const IncidentDetail: React.FC<IncidentDetailProps> = ({
           <audio
             ref={audioRef}
             src={getAudioSrc(incident.evidenceAudioUrl)}
+            crossOrigin="anonymous"
             onTimeUpdate={handleTimeUpdate}
+            onLoadedMetadata={handleTimeUpdate}
             onEnded={() => {
               setIsPlayingAudio(false);
               setAudioCurrentTime(0);
@@ -429,6 +433,7 @@ export const IncidentDetail: React.FC<IncidentDetailProps> = ({
             }}
             onError={(e) => {
               console.warn('[AudioEvidence] Error loading source:', e);
+              setIsPlayingAudio(false);
             }}
             preload="metadata"
           />

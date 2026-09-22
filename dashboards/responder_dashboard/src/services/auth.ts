@@ -1,4 +1,14 @@
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+export function getApiBaseUrl(): string {
+  if (import.meta.env.VITE_API_URL) return import.meta.env.VITE_API_URL;
+  if (
+    typeof window !== 'undefined' &&
+    window.location.hostname &&
+    window.location.hostname !== 'localhost'
+  ) {
+    return `http://${window.location.hostname}:3000`;
+  }
+  return 'http://localhost:3000';
+}
 
 export interface ResponderUser {
   id: string;
@@ -18,6 +28,7 @@ const TOKEN_KEY = 'guardian_responder_token';
 const USER_KEY = 'guardian_responder_user';
 
 export async function loginResponder(phone: string, password: string): Promise<AuthResponse> {
+  const API_BASE = getApiBaseUrl();
   const res = await fetch(`${API_BASE}/api/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -44,6 +55,7 @@ export async function registerResponder(
   name: string,
   isVolunteer: boolean = true
 ): Promise<AuthResponse> {
+  const API_BASE = getApiBaseUrl();
   const res = await fetch(`${API_BASE}/api/auth/register`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

@@ -36,11 +36,32 @@ async function bootstrap() {
     },
   });
 
-  // Register static file serving for uploaded evidence
+  // Register static file serving for uploaded evidence with proper audio streaming headers
   await app.register(fastifyStatic as any, {
     root: path.join(process.cwd(), "uploads"),
     prefix: "/uploads/",
     decorateReply: false,
+    setHeaders: (res: any, pathName: string) => {
+      const setH = (key: string, val: string) => {
+        if (typeof res?.header === "function") {
+          res.header(key, val);
+        } else if (typeof res?.setHeader === "function") {
+          res.setHeader(key, val);
+        } else if (res?.raw && typeof res.raw.setHeader === "function") {
+          res.raw.setHeader(key, val);
+        }
+      };
+
+      setH("Access-Control-Allow-Origin", "*");
+      setH("Accept-Ranges", "bytes");
+      if (pathName.endsWith(".m4a")) {
+        setH("Content-Type", "audio/mp4");
+      } else if (pathName.endsWith(".wav")) {
+        setH("Content-Type", "audio/wav");
+      } else if (pathName.endsWith(".webm")) {
+        setH("Content-Type", "audio/webm");
+      }
+    },
   });
 
   // Enable CORS

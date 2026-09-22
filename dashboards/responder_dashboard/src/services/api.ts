@@ -1,4 +1,35 @@
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+export function getApiBaseUrl(): string {
+  if (import.meta.env.VITE_API_URL) return import.meta.env.VITE_API_URL;
+  if (
+    typeof window !== 'undefined' &&
+    window.location.hostname &&
+    window.location.hostname !== 'localhost'
+  ) {
+    return `http://${window.location.hostname}:3000`;
+  }
+  return 'http://localhost:3000';
+}
+
+const INCIDENTS_CACHE_KEY = 'guardian_responder_cached_incidents';
+
+export function getCachedIncidents(): Incident[] {
+  try {
+    const raw = localStorage.getItem(INCIDENTS_CACHE_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function saveCachedIncidents(incidents: Incident[]): void {
+  try {
+    if (incidents && Array.isArray(incidents)) {
+      localStorage.setItem(INCIDENTS_CACHE_KEY, JSON.stringify(incidents));
+    }
+  } catch (e) {
+    console.warn('Failed to cache incidents in localStorage:', e);
+  }
+}
 
 export interface User {
   id: string;
@@ -35,6 +66,7 @@ export interface Incident {
 }
 
 export async function loginDemoResponder(): Promise<{ token: string; user: User }> {
+  const API_URL = getApiBaseUrl();
   try {
     const res = await fetch(`${API_URL}/api/auth/login`, {
       method: 'POST',
@@ -72,15 +104,23 @@ export async function loginDemoResponder(): Promise<{ token: string; user: User 
 }
 
 export async function fetchIncidents(token?: string): Promise<Incident[]> {
+  const API_URL = getApiBaseUrl();
+  const activeToken = token || localStorage.getItem('guardian_responder_token') || '';
   try {
     const res = await fetch(`${API_URL}/api/incidents`, {
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      headers: activeToken ? { Authorization: `Bearer ${activeToken}` } : {},
     });
-    if (res.ok) return await res.json();
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data)) {
+        saveCachedIncidents(data);
+        return data;
+      }
+    }
   } catch (err) {
-    console.warn('Failed to fetch incidents from API:', err);
+    console.warn('Failed to fetch incidents from API, using cached state:', err);
   }
-  return [];
+  return getCachedIncidents();
 }
 
 export async function updateIncidentStatus(
@@ -88,16 +128,24 @@ export async function updateIncidentStatus(
   status: string,
   token?: string,
 ): Promise<Incident | null> {
+  const API_URL = getApiBaseUrl();
+  const activeToken = token || localStorage.getItem('guardian_responder_token') || '';
   try {
     const res = await fetch(`${API_URL}/api/incidents/${incidentId}/status`, {
       method: 'PATCH',
       headers: {
         'Content-Type': 'application/json',
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(activeToken ? { Authorization: `Bearer ${activeToken}` } : {}),
       },
       body: JSON.stringify({ status }),
     });
-    if (res.ok) return await res.json();
+    if (res.ok) {
+      const updated = await res.json();
+      const cached = getCachedIncidents();
+      const updatedList = cached.map((i) => (i.id === incidentId ? { ...i, status } : i));
+      saveCachedIncidents(updatedList);
+      return updated;
+    }
   } catch (err) {
     console.error('Failed to update status:', err);
   }
