@@ -180,8 +180,11 @@ export default function App() {
     recordingUri: null,
     uploadedUrl: null,
     errorMessage: null,
-    isSimulated: false,
   });
+
+  const [resolutionNotice, setResolutionNotice] = useState<string | null>(null);
+  const [showCancelModal, setShowCancelModal] = useState<boolean>(false);
+  const [calculatorTriggerNotice, setCalculatorTriggerNotice] = useState<string | null>(null);
 
   const socketRef = useRef<Socket | null>(null);
   const coordsRef = useRef<{ lat: number; lng: number } | null>(coords);
@@ -334,9 +337,6 @@ export default function App() {
     });
     return unsub;
   }, []);
-
-  const [resolutionNotice, setResolutionNotice] = useState<string | null>(null);
-  const [showCancelModal, setShowCancelModal] = useState<boolean>(false);
 
   // Synchronize ref states
   useEffect(() => {
@@ -775,8 +775,6 @@ export default function App() {
       return;
     }
 
-    hardwareLocationService.setSimulatedMode(!isHardwareGps, coordsRef.current);
-
     const handleLocationUpdate = (loc: LocationFix) => {
       setCoords({ lat: loc.lat, lng: loc.lng });
       setLocationAccuracy(loc.accuracy ?? null);
@@ -821,7 +819,7 @@ export default function App() {
     return () => {
       hardwareLocationService.stopTracking();
     };
-  }, [isDevicePoweredOff, isHardwareGps]);
+  }, [isDevicePoweredOff]);
 
   // Live Battery Monitoring via Hardware Battery Service
   useEffect(() => {
@@ -996,8 +994,6 @@ export default function App() {
   };
 
   // Stealth Calculator Decoy Logic
-  const [calculatorTriggerNotice, setCalculatorTriggerNotice] = useState<string | null>(null);
-
   const handleCalcPress = (btn: string) => {
     if (btn === "C") {
       setCalculatorInput("0");
@@ -2083,73 +2079,21 @@ export default function App() {
             </Text>
           </View>
 
-          {/* QA Simulated Battery Buttons */}
-          <Text style={[styles.metaLabel, { marginTop: 8, marginBottom: 4 }]}>
-            Simulate Battery QA:
-          </Text>
           <View style={styles.buttonWrapRow}>
             <TouchableOpacity
               style={styles.battBtn}
               activeOpacity={0.75}
               onPress={() => {
-                hardwareBatteryService.setSimulatedLevel(100, (i) =>
-                  setBatteryLevel(i.level),
-                );
-                setBatteryLevel(100);
-              }}
-            >
-              <Text style={styles.battBtnText}>100%</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.battBtn}
-              activeOpacity={0.75}
-              onPress={() => {
-                hardwareBatteryService.setSimulatedLevel(15, (i) =>
-                  setBatteryLevel(i.level),
-                );
-                setBatteryLevel(15);
-              }}
-            >
-              <Text style={styles.battBtnText}>15%</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.battBtn, styles.battBtnCritical]}
-              activeOpacity={0.75}
-              onPress={() => {
-                hardwareBatteryService.setSimulatedLevel(4, (i) =>
-                  setBatteryLevel(i.level),
-                );
-                setBatteryLevel(4);
-                setLastGaspSent(true);
-                dispatchPreShutdownLastGasp("MANUAL_CRITICAL_BATTERY_QA");
-                if (coordsRef.current) {
-                  transmitLocation(
-                    coordsRef.current.lat,
-                    coordsRef.current.lng,
-                    4,
-                    true,
-                  );
-                  triggerSmsFallback(
-                    coordsRef.current.lat,
-                    coordsRef.current.lng,
-                    4,
-                  );
-                }
-              }}
-            >
-              <Text style={styles.battBtnCriticalText}>4% (Dying)</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.battBtn}
-              activeOpacity={0.75}
-              onPress={() => {
-                hardwareBatteryService.setSimulatedLevel(null);
                 hardwareBatteryService
                   .getBatterySnapshot()
-                  .then((i) => setBatteryLevel(i.level));
+                  .then((i) => {
+                    setBatteryLevel(i.level);
+                    setBatteryState(i.state);
+                    setIsLowPowerMode(i.isLowPowerMode);
+                  });
               }}
             >
-              <Text style={styles.battBtnText}>🔄 Real</Text>
+              <Text style={styles.battBtnText}>🔄 Refresh Hardware Battery</Text>
             </TouchableOpacity>
           </View>
 

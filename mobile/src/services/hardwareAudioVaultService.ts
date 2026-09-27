@@ -24,7 +24,6 @@ export interface AudioVaultState {
   recordingUri: string | null;
   uploadedUrl: string | null;
   errorMessage: string | null;
-  isSimulated: boolean;
 }
 
 export type AudioVaultListener = (state: AudioVaultState) => void;
@@ -48,7 +47,6 @@ class HardwareAudioVaultService {
     recordingUri: null,
     uploadedUrl: null,
     errorMessage: null,
-    isSimulated: false,
   };
 
   constructor() {
@@ -68,13 +66,20 @@ class HardwareAudioVaultService {
     try {
       if (Platform.OS !== "web") {
         await requestRecordingPermissionsAsync();
-        await setAudioModeAsync({
-          allowsRecording: true,
-          playsInSilentMode: true,
-          shouldPlayInBackground: true,
-          allowsBackgroundRecording: true,
-          interruptionMode: "duckOthers",
-        });
+        try {
+          await setAudioModeAsync({
+            allowsRecording: true,
+            playsInSilentMode: true,
+            shouldPlayInBackground: true,
+            allowsBackgroundRecording: false,
+            interruptionMode: "duckOthers",
+          });
+        } catch {
+          await setAudioModeAsync({
+            allowsRecording: true,
+            playsInSilentMode: true,
+          });
+        }
       }
     } catch (err: any) {
       console.warn(
@@ -154,12 +159,12 @@ class HardwareAudioVaultService {
       this.startMeteringLoop();
     } catch (err: any) {
       console.warn(
-        "[HardwareAudioVault] Native mic start error, using fallback:",
+        "[HardwareAudioVault] Recording initialization error:",
         err?.message,
       );
-      this.state.isSimulated = true;
-      this.startCountdown(maxDurationSeconds);
-      this.startMeteringLoop();
+      this.state.status = "error";
+      this.state.errorMessage = err?.message || "Audio recording failed";
+      this.emitState();
     }
   }
 
@@ -169,13 +174,20 @@ class HardwareAudioVaultService {
       throw new Error("Microphone permission not granted");
     }
 
-    await setAudioModeAsync({
-      allowsRecording: true,
-      playsInSilentMode: true,
-      shouldPlayInBackground: true,
-      allowsBackgroundRecording: true,
-      interruptionMode: "duckOthers",
-    });
+    try {
+      await setAudioModeAsync({
+        allowsRecording: true,
+        playsInSilentMode: true,
+        shouldPlayInBackground: true,
+        allowsBackgroundRecording: false,
+        interruptionMode: "duckOthers",
+      });
+    } catch {
+      await setAudioModeAsync({
+        allowsRecording: true,
+        playsInSilentMode: true,
+      });
+    }
 
     const recordingOptions: RecordingOptions = {
       isMeteringEnabled: true,
@@ -230,7 +242,7 @@ class HardwareAudioVaultService {
       mediaRecorder.start(1000); // 1s slice
       this.webMediaRecorder = mediaRecorder;
     } else {
-      this.state.isSimulated = true;
+      throw new Error("Web MediaRecorder is not supported on this browser/environment");
     }
   }
 
@@ -384,62 +396,21 @@ class HardwareAudioVaultService {
     });
   }
 
-  public generateDemoWavBase64(durationSeconds: number = 3): string {
-    const sampleRate = 8000;
-    const numSamples = sampleRate * durationSeconds;
-    const buffer = new ArrayBuffer(44 + numSamples * 2);
-    const view = new DataView(buffer);
-
-    // Write WAV header
-    const writeStr = (offset: number, str: string) => {
-      for (let i = 0; i < str.length; i++) {
-        view.setUint8(offset + i, str.charCodeAt(i));
-      }
-    };
-    writeStr(0, 'RIFF');
-    view.setUint32(4, 36 + numSamples * 2, true);
-    writeStr(8, 'WAVE');
-    writeStr(12, 'fmt ');
-    view.setUint32(16, 16, true);
-    view.setUint16(20, 1, true); // PCM
-    view.setUint16(22, 1, true); // Mono
-    view.setUint32(24, sampleRate, true);
-    view.setUint32(28, sampleRate * 2, true);
-    view.setUint16(32, 2, true);
-    view.setUint16(34, 16, true);
-    writeStr(36, 'data');
-    view.setUint32(40, numSamples * 2, true);
-
-    // Ambient room atmosphere audio (gentle low-frequency room tone & subtle noise)
-    for (let i = 0; i < numSamples; i++) {
-      const t = i / sampleRate;
-      const roomHum = Math.sin(2 * Math.PI * 180 * t) * 0.08;
-      const ambientNoise = (Math.random() - 0.5) * 0.05;
-      const sample = (roomHum + ambientNoise) * 32767;
-      view.setInt16(44 + i * 2, Math.round(sample), true);
-    }
-
-    const bytes = new Uint8Array(buffer);
-    let binary = '';
-    for (let i = 0; i < bytes.byteLength; i++) {
-      binary += String.fromCharCode(bytes[i]);
-    }
-    if (typeof btoa !== 'undefined') {
-      return 'data:audio/wav;base64,' + btoa(binary);
-    }
-    return '';
-  }
-
   private async uploadToVault(
     backendUrl: string,
     fileUri: string | null,
     base64Data: string | null,
     authToken?: string,
-  ): Promise<string> {
+  ): Promise<string | null> {
+    if (!base64Data && !fileUri) {
+      console.warn("[HardwareAudioVault] ⚠️ No real audio evidence recorded to upload.");
+      return null;
+    }
+
     const incidentId = this.currentIncidentId || `inc_vault_${Date.now()}`;
     const targetUrl = `${backendUrl}/api/incidents/${incidentId}/evidence`;
 
-    console.log(`[HardwareAudioVault] 🚀 Securing 30s audio evidence to: ${targetUrl}`);
+    console.log(`[HardwareAudioVault] 🚀 Securing 30s real audio evidence to: ${targetUrl}`);
 
     try {
       // 1. Primary Base64 JSON Upload (Reliable across all platforms & proxies)
@@ -460,8 +431,6 @@ class HardwareAudioVaultService {
         payload.audioBase64 = base64Data;
       } else if (fileUri) {
         payload.evidenceAudioUrl = fileUri;
-      } else {
-        payload.audioBase64 = this.generateDemoWavBase64(3);
       }
 
       const response = await fetch(targetUrl, {
@@ -527,21 +496,19 @@ class HardwareAudioVaultService {
       }
     } catch (err: any) {
       console.warn(
-        "[HardwareAudioVault] Vault upload error (saved to local vault):",
+        "[HardwareAudioVault] Vault upload error:",
         err?.message,
       );
     }
 
-    // Default to secure verified local vault reference
-    const securedUrl = `/uploads/evidence/evidence_${incidentId}.m4a`;
     this.state = {
       ...this.state,
-      status: "secured",
-      uploadedUrl: securedUrl,
+      status: "error",
+      errorMessage: "Failed to upload audio evidence",
     };
     this.emitState();
 
-    return securedUrl;
+    return null;
   }
 
   public reset(): void {
@@ -573,7 +540,6 @@ class HardwareAudioVaultService {
       recordingUri: null,
       uploadedUrl: null,
       errorMessage: null,
-      isSimulated: false,
     };
     this.emitState();
   }

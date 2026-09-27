@@ -131,13 +131,13 @@ describe('IncidentsController', () => {
       expect(result.evidenceAudioUrl).toBe('https://s3.amazonaws.com/evidence/audio.m4a');
     });
 
-    it('should fallback to default vault payload if no audio data is supplied', async () => {
+    it('should return success false if no audio data is supplied', async () => {
       const req = { isMultipart: () => false };
-      incidentsService.attachAudioEvidence.mockResolvedValue({ id: sampleUuid });
 
       const result = await controller.uploadAudioEvidence(sampleUuid, req, {});
-      expect(result.success).toBe(true);
-      expect(result.evidenceAudioUrl).toContain('/uploads/evidence/');
+      expect(result.success).toBe(false);
+      expect(result.incidentId).toBe(sampleUuid);
+      expect(incidentsService.attachAudioEvidence).not.toHaveBeenCalled();
     });
   });
 

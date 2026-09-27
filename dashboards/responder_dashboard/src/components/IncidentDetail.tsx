@@ -32,7 +32,6 @@ export const IncidentDetail: React.FC<IncidentDetailProps> = ({
   const [audioCurrentTime, setAudioCurrentTime] = useState(0);
   const [audioDuration, setAudioDuration] = useState(30);
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  const synthAudioCtxRef = useRef<AudioContext | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const animFrameIdRef = useRef<number | null>(null);
 
@@ -120,35 +119,6 @@ export const IncidentDetail: React.FC<IncidentDetailProps> = ({
     setAudioProgress(0);
   }, [incident?.evidenceAudioUrl]);
 
-  const playSynthesizedDistressTone = () => {
-    try {
-      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
-      if (!AudioCtx) return;
-      const ctx = new AudioCtx();
-      synthAudioCtxRef.current = ctx;
-
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-
-      osc.type = 'sawtooth';
-      osc.frequency.setValueAtTime(880, ctx.currentTime);
-      osc.frequency.exponentialRampToValueAtTime(440, ctx.currentTime + 1.5);
-      osc.frequency.exponentialRampToValueAtTime(880, ctx.currentTime + 3.0);
-
-      gain.gain.setValueAtTime(0.15, ctx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 3.0);
-
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-
-      osc.start();
-      osc.stop(ctx.currentTime + 3.0);
-      setIsPlayingAudio(true);
-      setTimeout(() => setIsPlayingAudio(false), 3000);
-    } catch (e) {
-      console.warn('[AudioEvidence] Web Audio synth fallback error:', e);
-    }
-  };
 
   const toggleAudioPlay = () => {
     const audioSrc = getAudioSrc(incident?.evidenceAudioUrl);

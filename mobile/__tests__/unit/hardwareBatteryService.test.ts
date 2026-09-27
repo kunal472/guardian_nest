@@ -4,7 +4,6 @@ import * as Battery from 'expo-battery';
 describe('HardwareBatteryService Unit Tests', () => {
   beforeEach(() => {
     hardwareBatteryService.stopListening();
-    hardwareBatteryService.setSimulatedLevel(null);
     jest.clearAllMocks();
   });
 
@@ -41,11 +40,12 @@ describe('HardwareBatteryService Unit Tests', () => {
     expect(Battery.addBatteryLevelListener).toHaveBeenCalled();
   });
 
-  it('should support simulated battery levels for testing and QA', async () => {
-    hardwareBatteryService.setSimulatedLevel(12);
+  it('should handle hardware error gracefully by returning current info', async () => {
+    (Battery.getBatteryLevelAsync as jest.Mock).mockRejectedValueOnce(new Error('Hardware Battery Sensor Failed'));
 
     const snapshot = await hardwareBatteryService.getBatterySnapshot();
-    expect(snapshot.level).toBe(12);
+    expect(snapshot).toBeDefined();
+    expect(typeof snapshot.level).toBe('number');
   });
 
   it('should clean up subscriptions on stopListening()', async () => {

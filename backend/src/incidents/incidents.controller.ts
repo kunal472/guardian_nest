@@ -34,28 +34,6 @@ export class IncidentsController {
     );
   }
 
-  private generateValidSilentWavBuffer(durationSeconds: number = 3): Buffer {
-    const sampleRate = 8000;
-    const numSamples = sampleRate * durationSeconds;
-    const buffer = Buffer.alloc(44 + numSamples * 2);
-
-    buffer.write('RIFF', 0);
-    buffer.writeUInt32LE(36 + numSamples * 2, 4);
-    buffer.write('WAVE', 8);
-    buffer.write('fmt ', 12);
-    buffer.writeUInt32LE(16, 16);
-    buffer.writeUInt16LE(1, 20); // PCM
-    buffer.writeUInt16LE(1, 22); // Mono
-    buffer.writeUInt32LE(sampleRate, 24);
-    buffer.writeUInt32LE(sampleRate * 2, 28);
-    buffer.writeUInt16LE(2, 32);
-    buffer.writeUInt16LE(16, 34);
-    buffer.write('data', 36);
-    buffer.writeUInt32LE(numSamples * 2, 40);
-
-    return buffer;
-  }
-
   @Post(':id/evidence')
   async uploadAudioEvidence(
     @Param('id') incidentId: string,
@@ -103,11 +81,13 @@ export class IncidentsController {
       finalFileUrl = body.evidenceAudioUrl;
     }
 
-    // 4. Default fallback: synthesize a valid playable audio container (never corrupt text bytes)
+    // If no real audio data was supplied, do not fabricate dummy audio
     if (!finalFileUrl) {
-      const validAudio = this.generateValidSilentWavBuffer(3);
-      fs.writeFileSync(targetFilePath, validAudio);
-      finalFileUrl = `/uploads/evidence/${filename}`;
+      return {
+        success: false,
+        incidentId,
+        message: 'No valid audio evidence payload provided.',
+      };
     }
 
     const updatedIncident = await this.incidentsService.attachAudioEvidence(

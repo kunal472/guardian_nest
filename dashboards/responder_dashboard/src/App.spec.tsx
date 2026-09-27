@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { act } from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { App } from './App';
@@ -105,12 +105,16 @@ describe('App Component', () => {
 
     // 1. Socket Connect & Disconnect
     expect(socketHandlers['connect']).toBeDefined();
-    await waitFor(() => {
+    act(() => {
       socketHandlers['connect']();
+    });
+    await waitFor(() => {
       expect(screen.getByText(/Event Bus Connected/i)).toBeInTheDocument();
     });
 
-    socketHandlers['disconnect']();
+    act(() => {
+      socketHandlers['disconnect']();
+    });
     await waitFor(() => {
       expect(screen.getByText(/Connecting to Gateway.../i)).toBeInTheDocument();
     });
@@ -125,25 +129,31 @@ describe('App Component', () => {
       locationLogs: [],
       user: { id: 'u-99', name: 'Kyle Reese', phone: '+1999000222' },
     };
-    socketHandlers['incident:new'](newIncident);
+    act(() => {
+      socketHandlers['incident:new'](newIncident);
+    });
 
     await waitFor(() => {
       expect(screen.getAllByText('Kyle Reese').length).toBeGreaterThan(0);
     });
 
     // 3. Location Update Event
-    socketHandlers['location:update']({
-      incidentId: 'inc-999',
-      lat: 18.53,
-      lng: 73.86,
-      batteryLevel: 75,
-      timestamp: new Date().toISOString(),
+    act(() => {
+      socketHandlers['location:update']({
+        incidentId: 'inc-999',
+        lat: 18.53,
+        lng: 73.86,
+        batteryLevel: 75,
+        timestamp: new Date().toISOString(),
+      });
     });
 
     // 4. Incident Status Changed Event
-    socketHandlers['incident:status_changed']({
-      incidentId: 'inc-999',
-      status: 'RESOLVED',
+    act(() => {
+      socketHandlers['incident:status_changed']({
+        incidentId: 'inc-999',
+        status: 'RESOLVED',
+      });
     });
 
     await waitFor(() => {
@@ -151,9 +161,11 @@ describe('App Component', () => {
     });
 
     // 5. Incident Updated Full Payload Event
-    socketHandlers['incident:updated']({
-      ...newIncident,
-      status: 'FALSE_ALARM',
+    act(() => {
+      socketHandlers['incident:updated']({
+        ...newIncident,
+        status: 'FALSE_ALARM',
+      });
     });
 
     await waitFor(() => {
@@ -161,7 +173,9 @@ describe('App Component', () => {
     });
 
     // 6. Nearby Broadcast Event
-    socketHandlers['nearby:broadcast']({ distressId: 'dist-1' });
+    act(() => {
+      socketHandlers['nearby:broadcast']({ distressId: 'dist-1' });
+    });
   });
 
   it('filters incident roster by status buttons', async () => {

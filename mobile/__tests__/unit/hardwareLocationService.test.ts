@@ -9,7 +9,6 @@ describe('HardwareLocationService Unit Tests', () => {
   beforeEach(() => {
     hardwareLocationService.stopTracking();
     (hardwareLocationService as any).hasPermission = true;
-    (hardwareLocationService as any).isSimulatedMode = false;
     (hardwareLocationService as any).fallbackCoords = null;
     jest.clearAllMocks();
   });
@@ -81,14 +80,18 @@ describe('HardwareLocationService Unit Tests', () => {
       expect(fix!.lng).toBe(-74.006);
     });
 
-    it('should support simulated coordinates mode for testing and QA', async () => {
-      hardwareLocationService.setSimulatedMode(true, { lat: 37.7749, lng: -122.4194 });
+    it('should return null when permission is denied and no genuine fix exists', async () => {
+      (hardwareLocationService as any).hasPermission = false;
+      const fix = await hardwareLocationService.getCurrentLocation();
+      expect(fix).toBeNull();
+    });
 
-      await hardwareLocationService.startTracking(() => {}, false);
+    it('should return null when GPS hardware raises an unhandled error', async () => {
+      (Location.getCurrentPositionAsync as jest.Mock).mockRejectedValueOnce(new Error('GPS Hardware Failure'));
+      (Location.getLastKnownPositionAsync as jest.Mock).mockRejectedValueOnce(new Error('No cached location'));
 
       const fix = await hardwareLocationService.getCurrentLocation();
-      expect(fix).not.toBeNull();
-      expect(fix!.lat).toBeDefined();
+      expect(fix).toBeNull();
     });
   });
 });

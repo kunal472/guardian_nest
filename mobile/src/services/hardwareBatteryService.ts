@@ -16,12 +16,9 @@ class HardwareBatteryService {
   private levelSubscription: Battery.Subscription | null = null;
   private stateSubscription: Battery.Subscription | null = null;
   private powerModeSubscription: Battery.Subscription | null = null;
-  private simulatedLevel: number | null = null;
-  private simulatedState: BatteryStateEnum = 'UNPLUGGED';
-  private simulatedLowPower: boolean = false;
 
   private currentInfo: BatteryInfo = {
-    level: 85,
+    level: 100,
     state: 'UNPLUGGED',
     isLowPowerMode: false,
     isCritical: false,
@@ -31,22 +28,13 @@ class HardwareBatteryService {
    * Fetch snapshot of current hardware battery metrics
    */
   public async getBatterySnapshot(): Promise<BatteryInfo> {
-    if (this.simulatedLevel !== null) {
-      return {
-        level: this.simulatedLevel,
-        state: this.simulatedState,
-        isLowPowerMode: this.simulatedLowPower,
-        isCritical: this.simulatedLevel <= 5,
-      };
-    }
-
     try {
       if (Platform.OS === 'web') {
         return await this.getWebBatterySnapshot();
       }
 
       const rawLevel = await Battery.getBatteryLevelAsync();
-      const batteryLevel = rawLevel >= 0 ? Math.round(rawLevel * 100) : 85;
+      const batteryLevel = rawLevel >= 0 ? Math.round(rawLevel * 100) : 100;
       const rawState = await Battery.getBatteryStateAsync();
       const isLowPower = await Battery.isLowPowerModeEnabledAsync();
 
@@ -64,7 +52,7 @@ class HardwareBatteryService {
 
       return this.currentInfo;
     } catch (err) {
-      console.warn('[HardwareBattery] getBatterySnapshot error, fallback:', err);
+      console.warn('[HardwareBattery] getBatterySnapshot error:', err);
       return this.currentInfo;
     }
   }
@@ -78,8 +66,6 @@ class HardwareBatteryService {
     // Initial snapshot
     const initial = await this.getBatterySnapshot();
     callback(initial);
-
-    if (this.simulatedLevel !== null) return;
 
     if (Platform.OS === 'web') {
       this.startWebListening(callback);
@@ -139,37 +125,20 @@ class HardwareBatteryService {
     }
   }
 
-  /**
-   * Set simulated battery level for developer QA / testing pre-shutdown Last Gasp
-   */
-  public setSimulatedLevel(level: number | null, onUpdate?: BatteryCallback): void {
-    this.simulatedLevel = level;
-    if (level !== null) {
-      this.currentInfo = {
-        level,
-        state: this.simulatedState,
-        isLowPowerMode: level <= 15,
-        isCritical: level <= 5,
-      };
-    }
-    if (onUpdate) {
-      onUpdate(this.currentInfo);
-    }
-  }
-
-  // --- Web Battery API Fallback ---
+  // --- Web Battery API Implementation ---
   private async getWebBatterySnapshot(): Promise<BatteryInfo> {
     if (typeof navigator !== 'undefined' && 'getBattery' in navigator) {
       try {
         const nav = navigator as any;
         const b = await nav.getBattery();
         const level = Math.round(b.level * 100);
-        return {
+        this.currentInfo = {
           level,
           state: b.charging ? 'CHARGING' : 'UNPLUGGED',
           isLowPowerMode: level <= 20,
           isCritical: level <= 5,
         };
+        return this.currentInfo;
       } catch {
         return this.currentInfo;
       }

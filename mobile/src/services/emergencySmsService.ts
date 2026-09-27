@@ -77,8 +77,8 @@ class EmergencySmsService {
         };
       }
 
-      const supported = await Linking.canOpenURL(uri).catch(() => true);
-      if (supported) {
+      // Try primary URI directly (avoids Android 11+ package visibility canOpenURL false negatives)
+      try {
         await Linking.openURL(uri);
         return {
           success: true,
@@ -86,8 +86,16 @@ class EmergencySmsService {
           formattedBody: body,
           timestamp,
         };
-      } else {
-        throw new Error('Device does not support SMS deep-link intent');
+      } catch (directErr) {
+        // Fallback to smsto: protocol for Android devices with custom messaging apps
+        const smstoUri = uri.replace(/^sms:/, 'smsto:');
+        await Linking.openURL(smstoUri);
+        return {
+          success: true,
+          uri: smstoUri,
+          formattedBody: body,
+          timestamp,
+        };
       }
     } catch (err: any) {
       console.warn('[EmergencySmsService] SMS dispatch warning:', err?.message);

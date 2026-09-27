@@ -11,20 +11,6 @@ import {
   ActivityIndicator,
 } from "react-native";
 import {
-  Shield,
-  Phone,
-  Lock,
-  User,
-  HeartHandshake,
-  Users,
-  CheckCircle2,
-  AlertCircle,
-  ArrowRight,
-  Zap,
-  Volume2,
-  ShieldAlert,
-} from "lucide-react-native";
-import {
   loginCitizen,
   registerCitizen,
   CitizenUser,
@@ -167,7 +153,7 @@ export const CitizenAuth: React.FC<CitizenAuthProps> = ({
         {/* Top Hero Brand */}
         <View style={styles.header}>
           <View style={styles.iconContainer}>
-            <Shield size={34} color="#ffffff" />
+            <Text style={styles.heroShieldEmoji}>🛡️</Text>
           </View>
           <View style={styles.appTitleRow}>
             <Text style={styles.appTitle}>PROJECT </Text>
@@ -267,14 +253,14 @@ export const CitizenAuth: React.FC<CitizenAuthProps> = ({
         {/* Feedback Alerts */}
         {errorMsg && (
           <View style={styles.errorBox}>
-            <AlertCircle size={18} color="#fca5a5" />
+            <Text style={styles.alertIcon}>⚠️</Text>
             <Text style={styles.errorText}>{errorMsg}</Text>
           </View>
         )}
 
         {successMsg && (
           <View style={styles.successBox}>
-            <CheckCircle2 size={18} color="#86efac" />
+            <Text style={styles.successIcon}>✅</Text>
             <Text style={styles.successText}>{successMsg}</Text>
           </View>
         )}
@@ -285,7 +271,7 @@ export const CitizenAuth: React.FC<CitizenAuthProps> = ({
             <View style={styles.fieldGroup}>
               <Text style={styles.label}>Full Name / Display Alias</Text>
               <View style={styles.inputWrapper}>
-                <User size={18} color="#64748b" style={styles.inputIcon} />
+                <Text style={styles.inputEmoji}>👤</Text>
                 <TextInput
                   style={styles.textInput}
                   placeholder="e.g. Maya Lin"
@@ -301,7 +287,7 @@ export const CitizenAuth: React.FC<CitizenAuthProps> = ({
           <View style={styles.fieldGroup}>
             <Text style={styles.label}>Phone Number (Identity Handle)</Text>
             <View style={styles.inputWrapper}>
-              <Phone size={18} color="#64748b" style={styles.inputIcon} />
+              <Text style={styles.inputEmoji}>📞</Text>
               <TextInput
                 style={styles.textInput}
                 placeholder="+1 (555) 019-888"
@@ -317,7 +303,7 @@ export const CitizenAuth: React.FC<CitizenAuthProps> = ({
           <View style={styles.fieldGroup}>
             <Text style={styles.label}>Security Password</Text>
             <View style={styles.inputWrapper}>
-              <Lock size={18} color="#64748b" style={styles.inputIcon} />
+              <Text style={styles.inputEmoji}>🔒</Text>
               <TextInput
                 style={styles.textInput}
                 placeholder="••••••••••••"
@@ -334,7 +320,7 @@ export const CitizenAuth: React.FC<CitizenAuthProps> = ({
               {/* Emergency Contact Section */}
               <View style={styles.sectionDivider} />
               <View style={styles.subSectionHeader}>
-                <Users size={16} color="#38bdf8" />
+                <Text style={styles.subSectionEmoji}>👥</Text>
                 <Text style={styles.subSectionTitle}>
                   Primary Emergency Contact
                 </Text>
@@ -347,7 +333,7 @@ export const CitizenAuth: React.FC<CitizenAuthProps> = ({
               <View style={styles.fieldGroup}>
                 <Text style={styles.label}>Contact Name / Relationship</Text>
                 <View style={styles.inputWrapper}>
-                  <User size={18} color="#64748b" style={styles.inputIcon} />
+                  <Text style={styles.inputEmoji}>👤</Text>
                   <TextInput
                     style={styles.textInput}
                     placeholder="e.g. David (Brother)"
@@ -361,7 +347,7 @@ export const CitizenAuth: React.FC<CitizenAuthProps> = ({
               <View style={styles.fieldGroup}>
                 <Text style={styles.label}>Contact Phone Number</Text>
                 <View style={styles.inputWrapper}>
-                  <Phone size={18} color="#64748b" style={styles.inputIcon} />
+                  <Text style={styles.inputEmoji}>📞</Text>
                   <TextInput
                     style={styles.textInput}
                     placeholder="+1 (555) 019-999"
@@ -376,7 +362,7 @@ export const CitizenAuth: React.FC<CitizenAuthProps> = ({
               {/* Edge ML Sensitivity Selector */}
               <View style={styles.sectionDivider} />
               <View style={styles.subSectionHeader}>
-                <Volume2 size={16} color="#a855f7" />
+                <Text style={styles.subSectionEmoji}>🔊</Text>
                 <Text style={styles.subSectionTitle}>
                   Acoustic Scream Sensitivity
                 </Text>
@@ -422,7 +408,7 @@ export const CitizenAuth: React.FC<CitizenAuthProps> = ({
                     isVolunteer && styles.checkboxActive,
                   ]}
                 >
-                  {isVolunteer && <CheckCircle2 size={16} color="#ffffff" />}
+                  {isVolunteer && <Text style={styles.checkMark}>✓</Text>}
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.volunteerTitle}>
@@ -456,7 +442,7 @@ export const CitizenAuth: React.FC<CitizenAuthProps> = ({
                     ? "Arm & Enter Safety HUD"
                     : "Complete Citizen Registration"}
                 </Text>
-                <ArrowRight size={18} color="#ffffff" />
+                <Text style={styles.submitArrow}>➔</Text>
               </View>
             )}
           </TouchableOpacity>
@@ -469,7 +455,7 @@ export const CitizenAuth: React.FC<CitizenAuthProps> = ({
             onPress={fillSampleCitizen}
             activeOpacity={0.8}
           >
-            <Zap size={14} color="#f59e0b" />
+            <Text style={styles.quickIcon}>⚡</Text>
             <Text style={styles.prefillButtonText}>Pre-fill Sample</Text>
           </TouchableOpacity>
 
@@ -478,7 +464,7 @@ export const CitizenAuth: React.FC<CitizenAuthProps> = ({
             onPress={onBypassGuestMode}
             activeOpacity={0.8}
           >
-            <ShieldAlert size={14} color="#ef4444" />
+            <Text style={styles.quickIcon}>🚨</Text>
             <Text style={styles.guestButtonText}>Test SOS (Guest)</Text>
           </TouchableOpacity>
         </View>
@@ -838,5 +824,34 @@ const styles = StyleSheet.create({
     textAlign: "center",
     marginTop: 18,
     fontFamily: Platform.OS === "ios" ? "Courier" : "monospace",
+  },
+  heroShieldEmoji: {
+    fontSize: 30,
+  },
+  alertIcon: {
+    fontSize: 16,
+  },
+  successIcon: {
+    fontSize: 16,
+  },
+  inputEmoji: {
+    fontSize: 14,
+    marginRight: 8,
+  },
+  subSectionEmoji: {
+    fontSize: 15,
+  },
+  checkMark: {
+    color: "#ffffff",
+    fontSize: 12,
+    fontWeight: "900",
+  },
+  submitArrow: {
+    color: "#ffffff",
+    fontSize: 16,
+    fontWeight: "900",
+  },
+  quickIcon: {
+    fontSize: 13,
   },
 });

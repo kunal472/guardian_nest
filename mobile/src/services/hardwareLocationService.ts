@@ -43,7 +43,6 @@ class HardwareLocationService {
   private watchSubscription: Location.LocationSubscription | null = null;
   private webWatchId: number | null = null;
   private hasPermission: boolean | null = null;
-  private isSimulatedMode: boolean = false;
   private fallbackCoords: { lat: number; lng: number } | null = null;
   private activeCallback: LocationCallback | null = null;
 
@@ -91,13 +90,9 @@ class HardwareLocationService {
   }
 
   /**
-   * Get single instantaneous high-accuracy GPS location fix with strict cache invalidation
+   * Get single instantaneous high-accuracy GPS location fix
    */
   public async getCurrentLocation(): Promise<LocationFix | null> {
-    if (this.isSimulatedMode && this.fallbackCoords) {
-      return this.getSimulatedFix();
-    }
-
     try {
       if (Platform.OS === 'web') {
         return await this.getWebCurrentPosition();
@@ -107,7 +102,7 @@ class HardwareLocationService {
 
       const hasPerm = this.hasPermission ?? (await this.requestPermissions());
       if (!hasPerm) {
-        return this.fallbackCoords ? this.getSimulatedFix() : null;
+        return null;
       }
 
       // 1. Fetch fresh high-accuracy position from satellite/network
@@ -134,7 +129,7 @@ class HardwareLocationService {
         logger.warn('[HardwareLocation] getCurrentPositionAsync fallback to cached:', freshErr);
       }
 
-      // 2. Fallback to last known position
+      // 2. Fallback to last known genuine position
       try {
         const lastKnown = await Location.getLastKnownPositionAsync({ maxAge: 120000 });
         if (lastKnown && lastKnown.coords && lastKnown.coords.latitude !== 0) {
@@ -157,10 +152,10 @@ class HardwareLocationService {
         }
       } catch {}
 
-      return this.fallbackCoords ? this.getSimulatedFix() : null;
+      return null;
     } catch (err) {
-      console.warn('[HardwareLocation] getCurrentLocation fallback:', err);
-      return this.fallbackCoords ? this.getSimulatedFix() : null;
+      console.warn('[HardwareLocation] getCurrentLocation error:', err);
+      return null;
     }
   }
 
@@ -173,11 +168,6 @@ class HardwareLocationService {
     this.stopTracking();
     this.activeCallback = onUpdate;
 
-    if (this.isSimulatedMode) {
-      this.startSimulatedTracking(onUpdate, isSosActive);
-      return;
-    }
-
     // 1. Fetch initial fresh position asynchronously and only emit if genuine
     this.getCurrentLocation().then((initialFix) => {
       if (initialFix && initialFix.lat !== 0 && this.activeCallback) {
@@ -188,7 +178,6 @@ class HardwareLocationService {
     try {
       const hasPerm = this.hasPermission ?? (await this.requestPermissions());
       if (!hasPerm) {
-        if (this.isSimulatedMode) this.startSimulatedTracking(onUpdate, isSosActive);
         return;
       }
 
@@ -226,7 +215,6 @@ class HardwareLocationService {
       );
     } catch (err) {
       console.warn('[HardwareLocation] Native watcher failed:', err);
-      if (this.isSimulatedMode) this.startSimulatedTracking(onUpdate, isSosActive);
     }
   }
 
@@ -253,58 +241,17 @@ class HardwareLocationService {
       navigator.geolocation.clearWatch(this.webWatchId);
       this.webWatchId = null;
     }
-    if (this.simulatedTimer) {
-      clearInterval(this.simulatedTimer);
-      this.simulatedTimer = null;
-    }
     this.activeCallback = null;
   }
 
-  // --- Platform & Simulated Fallbacks ---
+  // --- Real Web Geolocation Implementation ---
 
-  private simulatedTimer: any = null;
-
-  private getSimulatedFix(): LocationFix {
-    if (!this.fallbackCoords) {
-      return {
-        lat: 0,
-        lng: 0,
-        altitude: 0,
-        accuracy: 0,
-        speed: 0,
-        heading: 0,
-        timestamp: new Date().toISOString(),
-      };
-    }
-    const delta = (Math.random() - 0.5) * 0.0003;
-    this.fallbackCoords = {
-      lat: this.fallbackCoords.lat + delta,
-      lng: this.fallbackCoords.lng + delta,
-    };
-    return {
-      lat: this.fallbackCoords.lat,
-      lng: this.fallbackCoords.lng,
-      altitude: 12.5,
-      accuracy: 4.8,
-      speed: 0.2,
-      heading: 90,
-      timestamp: new Date().toISOString(),
-    };
-  }
-
-  private startSimulatedTracking(onUpdate: LocationCallback, isSosActive: boolean): void {
-    const intervalMs = isSosActive ? 1000 : 2000;
-    this.simulatedTimer = setInterval(() => {
-      onUpdate(this.getSimulatedFix());
-    }, intervalMs);
-  }
-
-  private getWebCurrentPosition(): Promise<LocationFix> {
+  private getWebCurrentPosition(): Promise<LocationFix | null> {
     return new Promise((resolve) => {
       if (typeof navigator !== 'undefined' && navigator.geolocation) {
         navigator.geolocation.getCurrentPosition(
           (pos) => {
-            const fix = {
+            const fix: LocationFix = {
               lat: pos.coords.latitude,
               lng: pos.coords.longitude,
               altitude: pos.coords.altitude,
@@ -318,12 +265,12 @@ class HardwareLocationService {
           },
           (err) => {
             console.warn('[HardwareLocation] Web GPS error:', err);
-            resolve(this.getSimulatedFix());
+            resolve(null);
           },
           { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
         );
       } else {
-        resolve(this.getSimulatedFix());
+        resolve(null);
       }
     });
   }
@@ -332,7 +279,7 @@ class HardwareLocationService {
     if (typeof navigator !== 'undefined' && navigator.geolocation) {
       this.webWatchId = navigator.geolocation.watchPosition(
         (pos) => {
-          const fix = {
+          const fix: LocationFix = {
             lat: pos.coords.latitude,
             lng: pos.coords.longitude,
             altitude: pos.coords.altitude,
@@ -346,18 +293,10 @@ class HardwareLocationService {
         },
         (err) => {
           console.warn('[HardwareLocation] Web watcher error:', err);
-          this.startSimulatedTracking(onUpdate, isSosActive);
         },
         { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
       );
-    } else {
-      this.startSimulatedTracking(onUpdate, isSosActive);
     }
-  }
-
-  public setSimulatedMode(enabled: boolean, coords?: { lat: number; lng: number } | null): void {
-    this.isSimulatedMode = enabled;
-    if (coords) this.fallbackCoords = coords;
   }
 }
 

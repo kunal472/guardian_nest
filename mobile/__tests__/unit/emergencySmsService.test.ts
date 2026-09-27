@@ -72,7 +72,7 @@ describe('EmergencySmsService Unit Tests', () => {
   });
 
   it('should handle dispatch failure gracefully', async () => {
-    jest.spyOn(Linking, 'canOpenURL').mockResolvedValueOnce(false);
+    jest.spyOn(Linking, 'openURL').mockRejectedValue(new Error('Device does not support SMS intent'));
 
     const result = await emergencySmsService.dispatchEmergencySms(mockPayload);
     expect(result.success).toBe(false);

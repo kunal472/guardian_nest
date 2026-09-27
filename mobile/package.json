@@ -9,7 +9,7 @@
     "web": "expo start --web",
     "download:models": "curl -L -o ./assets/models/ggml-tiny.en.bin https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en.bin && curl -L -o ./assets/models/yamnet.tflite https://storage.googleapis.com/tfhub-modules/google/lite-model/yamnet/tflite/1.tflite",
     "build:android": "cd android && ./gradlew.bat assembleRelease",
-    "build:android:debug": "cd android && gradlew.bat assembleDebug",
+    "build:android:debug": "cd android && ./gradlew.bat assembleDebug",
     "test": "jest",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
