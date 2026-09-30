@@ -14,6 +14,8 @@ export interface CitizenUser {
   role: 'USER' | 'RESPONDER' | 'ADMIN';
   isVolunteer: boolean;
   mlSensitivity: 'LOW' | 'MEDIUM' | 'HIGH';
+  bloodGroup?: string;
+  medicalNotes?: string;
   emergencyContacts?: EmergencyContact[];
 }
 

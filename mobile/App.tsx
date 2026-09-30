@@ -24,6 +24,9 @@ import {
   ModelPrediction,
 } from "./src/services/screamDetectionService";
 import { CitizenAuth } from "./src/components/CitizenAuth";
+import { ShieldTab } from "./src/components/ShieldTab";
+import { SafeCircleTab } from "./src/components/SafeCircleTab";
+import { DiagnosticsTab } from "./src/components/DiagnosticsTab";
 import {
   getStoredCitizenAuth,
   clearStoredCitizenAuth,
@@ -88,6 +91,7 @@ export default function App() {
   const [isSosActive, setIsSosActive] = useState<boolean>(false);
   const [incidentId, setIncidentId] = useState<string | null>(null);
   const [triggerType, setTriggerType] = useState<TriggerType>("MANUAL_SOS");
+  const [activeTab, setActiveTab] = useState<"SHIELD" | "CONTACTS" | "DIAGNOSTICS">("SHIELD");
   const [responderStatus, setResponderStatus] = useState<string | null>(null);
   const [isVolunteer, setIsVolunteer] = useState<boolean>(
     currentUser?.isVolunteer ?? false,
@@ -999,9 +1003,28 @@ export default function App() {
       setCalculatorInput("0");
       return;
     }
+    if (btn === "±") {
+      if (calculatorInput === "0" || calculatorInput === "Error") return;
+      setCalculatorInput((prev) =>
+        prev.startsWith("-") ? prev.slice(1) : "-" + prev
+      );
+      return;
+    }
+    if (btn === "%") {
+      try {
+        const val = Number(calculatorInput);
+        if (!isNaN(val)) {
+          setCalculatorInput(String(val / 100));
+        }
+      } catch {
+        setCalculatorInput("Error");
+      }
+      return;
+    }
     if (btn === "=") {
       if (calculatorInput === "1122") {
         // Silent SOS Trigger from Stealth Calculator
+        Vibration.vibrate(200);
         triggerDistress("SILENT_STEALTH_CALCULATOR");
         setCalculatorInput("0");
         setCalculatorTriggerNotice("🛡️ Silent SOS Transmitted");
@@ -1012,10 +1035,18 @@ export default function App() {
         setCalculatorInput("0");
       } else {
         try {
+          const sanitized = calculatorInput
+            .replace(/×/g, "*")
+            .replace(/÷/g, "/")
+            .replace(/−/g, "-");
           const evalResult = String(
-            Function(`'use strict'; return (${calculatorInput})`)(),
+            Function(`'use strict'; return (${sanitized})`)()
           );
-          setCalculatorInput(evalResult);
+          setCalculatorInput(
+            evalResult.length > 11
+              ? Number(evalResult).toPrecision(6)
+              : evalResult
+          );
         } catch {
           setCalculatorInput("Error");
         }
@@ -1023,7 +1054,12 @@ export default function App() {
       return;
     }
 
-    setCalculatorInput((prev) => (prev === "0" ? btn : prev + btn));
+    setCalculatorInput((prev) => {
+      if (prev === "0" || prev === "Error") {
+        return btn === "." ? "0." : btn;
+      }
+      return prev + btn;
+    });
   };
 
   // Render Citizen Auth if not authenticated and not in guest test mode
@@ -1080,70 +1116,96 @@ export default function App() {
 
   // Render Stealth Decoy Calculator Screen
   if (isStealthMode) {
+    const calcRows = [
+      [
+        { label: "C", type: "func", val: "C" },
+        { label: "±", type: "func", val: "±" },
+        { label: "%", type: "func", val: "%" },
+        { label: "÷", type: "op", val: "÷" },
+      ],
+      [
+        { label: "7", type: "num", val: "7" },
+        { label: "8", type: "num", val: "8" },
+        { label: "9", type: "num", val: "9" },
+        { label: "×", type: "op", val: "×" },
+      ],
+      [
+        { label: "4", type: "num", val: "4" },
+        { label: "5", type: "num", val: "5" },
+        { label: "6", type: "num", val: "6" },
+        { label: "−", type: "op", val: "−" },
+      ],
+      [
+        { label: "1", type: "num", val: "1" },
+        { label: "2", type: "num", val: "2" },
+        { label: "3", type: "num", val: "3" },
+        { label: "+", type: "op", val: "+" },
+      ],
+      [
+        { label: "0", type: "zero", val: "0" },
+        { label: ".", type: "num", val: "." },
+        { label: "=", type: "op", val: "=" },
+      ],
+    ];
+
     return (
       <SafeAreaView style={styles.calcContainer}>
-        <StatusBar barStyle="light-content" />
+        <StatusBar barStyle="light-content" backgroundColor="#000000" />
+
+        {/* Dynamic Full Width Number Display */}
         <View style={styles.calcDisplay}>
-          <Text style={styles.calcDisplayText}>{calculatorInput}</Text>
+          <Text
+            style={[
+              styles.calcDisplayText,
+              calculatorInput.length > 7 && { fontSize: 44 },
+              calculatorInput.length > 10 && { fontSize: 34 },
+            ]}
+            numberOfLines={1}
+            adjustsFontSizeToFit
+          >
+            {calculatorInput}
+          </Text>
         </View>
+
+        {/* 4x5 Authentic Button Grid */}
         <View style={styles.calcGrid}>
-          {[
-            "C",
-            "(",
-            ")",
-            "/",
-            "7",
-            "8",
-            "9",
-            "*",
-            "4",
-            "5",
-            "6",
-            "-",
-            "1",
-            "2",
-            "3",
-            "+",
-            "0",
-            ".",
-            "00",
-            "=",
-          ].map((btn) => (
-            <TouchableOpacity
-              key={btn}
-              style={[styles.calcBtn, btn === "=" && styles.calcBtnEqual]}
-              onPress={() => handleCalcPress(btn)}
-              activeOpacity={0.75}
-            >
-              <Text style={styles.calcBtnText}>{btn}</Text>
-            </TouchableOpacity>
+          {calcRows.map((row, rIdx) => (
+            <View key={rIdx} style={styles.calcRow}>
+              {row.map((btn) => (
+                <TouchableOpacity
+                  key={btn.label}
+                  style={[
+                    styles.calcBtn,
+                    btn.type === "func" && styles.calcBtnFunc,
+                    btn.type === "op" && styles.calcBtnOp,
+                    btn.type === "zero" && styles.calcBtnZero,
+                  ]}
+                  onPress={() => handleCalcPress(btn.val)}
+                  activeOpacity={0.65}
+                >
+                  <Text
+                    style={[
+                      styles.calcBtnText,
+                      btn.type === "func" && styles.calcBtnFuncText,
+                      btn.type === "op" && styles.calcBtnOpText,
+                    ]}
+                  >
+                    {btn.label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
           ))}
         </View>
+
         {calculatorTriggerNotice && (
-          <View
-            style={{
-              paddingVertical: 6,
-              paddingHorizontal: 12,
-              backgroundColor: "rgba(16, 185, 129, 0.2)",
-              borderRadius: 6,
-              alignSelf: "center",
-              marginBottom: 8,
-              borderWidth: 1,
-              borderColor: "rgba(16, 185, 129, 0.4)",
-            }}
-          >
-            <Text
-              style={{
-                color: "#34d399",
-                fontSize: 12,
-                fontWeight: "700",
-                textAlign: "center",
-              }}
-            >
+          <View style={styles.calcNoticeBox}>
+            <Text style={styles.calcNoticeText}>
               {calculatorTriggerNotice}
             </Text>
           </View>
         )}
+
         <Text style={styles.calcHint}>
           Decoy Mode • Enter 1122= for Silent SOS • 9999= to return
         </Text>
@@ -1154,1273 +1216,239 @@ export default function App() {
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor="#0a0d14" />
-      <ScrollView
-        contentContainerStyle={styles.scrollContent}
-        keyboardShouldPersistTaps="handled"
-        showsVerticalScrollIndicator={false}
-      >
-        {/* Top Header & Citizen Profile Bar */}
-        <View style={styles.header}>
-          <View style={{ flex: 1, paddingRight: 8 }}>
-            <Text style={styles.headerTitle}>GUARDIAN EDGE</Text>
-            <Text style={styles.headerSubtitle} numberOfLines={1}>
-              {isSosActive
-                ? "🚨 DISTRESS STREAM ACTIVE (1/s)"
-                : "STANDBY MODE (1/10s)"}
-            </Text>
-          </View>
 
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-            <TouchableOpacity
-              style={styles.stealthBtn}
-              onPress={() => setIsStealthMode(true)}
-              activeOpacity={0.8}
-              hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
-            >
-              <Text style={styles.stealthBtnText}>🕵️ Decoy</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.logoutBtn}
-              onPress={handleLogout}
-              activeOpacity={0.8}
-              hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
-            >
-              <Text style={styles.logoutBtnText}>Sign Out</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-
-        {/* Live Server Host & Connectivity Banner */}
-        <View
-          style={{
-            backgroundColor: isConnected
-              ? "rgba(16, 185, 129, 0.12)"
-              : "rgba(239, 68, 68, 0.15)",
-            borderColor: isConnected
-              ? "rgba(16, 185, 129, 0.3)"
-              : "rgba(239, 68, 68, 0.35)",
-            borderWidth: 1,
-            borderRadius: 8,
-            paddingHorizontal: 10,
-            paddingVertical: 6,
-            marginBottom: 12,
-            flexDirection: "row",
-            alignItems: "center",
-            justifyContent: "space-between",
-          }}
-        >
-          <Text
-            style={{
-              fontSize: 11,
-              color: isConnected ? "#6ee7b7" : "#fca5a5",
-              fontWeight: "700",
-            }}
-            numberOfLines={1}
-          >
-            {isConnected ? "🟢 ONLINE" : "🔴 OFFLINE"}: {backendUrl}
-          </Text>
-          <Text style={{ fontSize: 10, color: "#94a3b8" }}>
-            {pingCount > 0
-              ? `${pingCount} pings sent`
-              : isConnected
-                ? "Connected"
-                : "Check Wi-Fi / IP"}
+      {/* Top Header & Stealth Decoy Action */}
+      <View style={styles.header}>
+        <View style={{ flex: 1, paddingRight: 8 }}>
+          <Text style={styles.headerTitle}>GUARDIAN EDGE</Text>
+          <Text style={styles.headerSubtitle} numberOfLines={1}>
+            {isSosActive
+              ? "🚨 DISTRESS STREAM ACTIVE (1/s)"
+              : "STANDBY MODE (1/10s)"}
           </Text>
         </View>
 
-        {/* Citizen Profile Card */}
-        {currentUser && (
-          <View style={styles.citizenProfileCard}>
-            <View
-              style={{ flexDirection: "row", alignItems: "center", gap: 10 }}
-            >
-              <View style={styles.citizenAvatar}>
-                <Text style={styles.citizenAvatarText}>
-                  {currentUser.name
-                    ? currentUser.name.charAt(0).toUpperCase()
-                    : "C"}
-                </Text>
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.citizenName} numberOfLines={1}>
-                  {currentUser.name || "Citizen Officer"}
-                </Text>
-                <Text style={styles.citizenPhone} numberOfLines={1}>
-                  {currentUser.phone} •{" "}
-                  {currentUser.isVolunteer ? "🤝 Volunteer" : "Protected"}
-                </Text>
-              </View>
-            </View>
-
-            {currentUser.emergencyContacts &&
-              currentUser.emergencyContacts.length > 0 && (
-                <View style={styles.emergencyContactPill}>
-                  <Text
-                    style={styles.emergencyContactPillText}
-                    numberOfLines={1}
-                  >
-                    🚨 Relay: {currentUser.emergencyContacts[0].contactName} (
-                    {currentUser.emergencyContacts[0].phoneNumber})
-                  </Text>
-                </View>
-              )}
-          </View>
-        )}
-
-        {/* Critical Last Gasp Alert Banner */}
-        {batteryLevel <= 5 && isSosActive && (
-          <View style={styles.lastGaspBanner}>
-            <Text style={styles.lastGaspTitle}>
-              ⚡ CRITICAL BATTERY "LAST GASP" TRANSMISSION
-            </Text>
-            <Text style={styles.lastGaspSub}>
-              Battery at {Math.round(batteryLevel)}%! Final GPS fix pinned &
-              broadcasted.
-            </Text>
-          </View>
-        )}
-
-        {/* Dynamic Edge ML Remote Sync Banner */}
-        {dynamicConfigNotice && (
-          <View style={styles.dynamicConfigBanner}>
-            <Text style={styles.dynamicConfigBannerTitle}>
-              ⚙️ GLOBAL EDGE ML CONFIG SYNCED
-            </Text>
-            <Text style={styles.dynamicConfigBannerSub}>
-              {dynamicConfigNotice}
-            </Text>
-          </View>
-        )}
-
-        {/* Pre-Shutdown Beacon Feedback Banner */}
-        {shutdownLastGaspNotice && (
-          <View style={styles.shutdownNoticeBanner}>
-            <Text style={styles.shutdownNoticeBannerTitle}>
-              🛡️ PRE-SHUTDOWN BEACON DISPATCHED
-            </Text>
-            <Text style={styles.shutdownNoticeBannerSub}>
-              {shutdownLastGaspNotice}
-            </Text>
-          </View>
-        )}
-
-        {/* Incident Resolution Notice */}
-        {resolutionNotice && (
-          <View style={styles.resolutionBanner}>
-            <Text style={styles.resolutionBannerTitle}>
-              🛡️ EMERGENCY INCIDENT RESOLVED
-            </Text>
-            <Text style={styles.resolutionBannerSub}>
-              {resolutionNotice}
-            </Text>
-          </View>
-        )}
-
-        {/* Dynamic Responder Alert Notification */}
-        {responderStatus && isSosActive && (
-          <View style={styles.responderBanner}>
-            <Text style={styles.responderBannerTitle}>
-              {responderStatus === "DISPATCHED"
-                ? "🚑 RESCUE UNIT EN ROUTE"
-                : "⚠️ DISPATCH NOTIFIED"}
-            </Text>
-            <Text style={styles.responderBannerSub}>
-              Status: {responderStatus} • Mesh active
-            </Text>
-          </View>
-        )}
-
-        {/* Nearby Alert for Volunteers */}
-        {nearbyAlert && isVolunteer && (
-          <View style={styles.nearbyBanner}>
-            <Text style={styles.nearbyBannerTitle}>
-              🚨 NEARBY DISTRESS DETECTED
-            </Text>
-            <Text style={styles.nearbyBannerSub}>
-              {nearbyAlert.victimName || "Victim"} is within{" "}
-              {nearbyAlert.distanceMeters || "250"}m!
-            </Text>
-          </View>
-        )}
-
-        {/* Main SOS Trigger Button */}
-        <View style={styles.sosContainer}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
           <TouchableOpacity
-            style={[styles.sosButton, isSosActive && styles.sosButtonActive]}
-            activeOpacity={0.75}
-            onPress={() =>
-              isSosActive ? handlePromptCancelSos() : triggerDistress("MANUAL_SOS")
-            }
-            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+            style={styles.stealthBtn}
+            onPress={() => setIsStealthMode(true)}
+            activeOpacity={0.8}
+            hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
           >
-            <Text style={styles.sosText}>{isSosActive ? "CANCEL" : "SOS"}</Text>
-            <Text style={styles.sosSubtext}>
-              {isSosActive ? "Tap to Disarm / Resolve" : "Tap for Emergency"}
-            </Text>
+            <Text style={styles.stealthBtnText}>🕵️ Decoy</Text>
           </TouchableOpacity>
         </View>
+      </View>
 
-        {/* Two-Tier On-Device ML Distress Pipeline Card */}
-        <View style={styles.card}>
-          <View style={styles.cardHeaderRow}>
-            <View style={{ flex: 1, paddingRight: 8 }}>
-              <Text style={styles.cardTitle}>Two-Tier Edge ML Distress</Text>
-              <Text style={styles.cardDesc}>
-                100% Offline Neural Spotter & Verification
-              </Text>
-            </View>
-            <View
-              style={[
-                styles.modelStatusBadge,
-                pipelineTelemetry.isPipelineActive &&
-                  styles.modelStatusBadgeReady,
-              ]}
-            >
-              <Text style={styles.modelStatusBadgeText}>
-                {pipelineTelemetry.isPipelineActive
-                  ? "🟢 ARMED (ON-DEVICE)"
-                  : "⚪ STANDBY"}
-              </Text>
-            </View>
-          </View>
-
-          {/* Tier 1: Spotters & Ring Buffer */}
-          <View style={styles.subCard}>
-            <View style={styles.rowBetween}>
-              <Text
-                style={{ fontSize: 12, fontWeight: "700", color: "#38bdf8" }}
-              >
-                TIER 1: Always-On Neural Spotters
-              </Text>
-              <Text
-                style={{
-                  fontSize: 11,
-                  color:
-                    pipelineTelemetry.tier1Status === "spotting"
-                      ? "#10b981"
-                      : "#f59e0b",
-                  fontWeight: "700",
-                }}
-              >
-                {pipelineTelemetry.tier1Status === "spotting"
-                  ? "⚡ SPOTTING (16kHz)"
-                  : pipelineTelemetry.tier1Status === "triggered"
-                    ? "🚨 TRIGGERED"
-                    : "IDLE"}
-              </Text>
-            </View>
-
-            {/* Real-Time Acoustic Microphone Amplitude Meter */}
-            <View style={{ marginTop: 8 }}>
-              <View style={styles.rowBetween}>
-                <Text style={styles.metaLabel}>Live Vocal Amplitude (Mic):</Text>
-                <Text
-                  style={[
-                    styles.metaValue,
-                    {
-                      color:
-                        (pipelineTelemetry.liveAudioEnergyPercent ?? 0) > 60
-                          ? "#ef4444"
-                          : (pipelineTelemetry.liveAudioEnergyPercent ?? 0) > 30
-                            ? "#fbbf24"
-                            : "#10b981",
-                      fontWeight: "800",
-                    },
-                  ]}
-                >
-                  {(pipelineTelemetry.liveDbfs ?? -55.0).toFixed(1)} dBFS (
-                  {pipelineTelemetry.liveAudioEnergyPercent ?? 0}%)
-                </Text>
-              </View>
-              <View style={styles.meterTrack}>
-                <View
-                  style={[
-                    styles.meterFill,
-                    {
-                      width: `${pipelineTelemetry.liveAudioEnergyPercent ?? 8}%`,
-                      backgroundColor:
-                        (pipelineTelemetry.liveAudioEnergyPercent ?? 0) > 60
-                          ? "#ef4444"
-                          : (pipelineTelemetry.liveAudioEnergyPercent ?? 0) > 30
-                            ? "#fbbf24"
-                            : "#10b981",
-                    },
-                  ]}
-                />
-              </View>
-            </View>
-
-            <View style={styles.metaStack}>
-              <Text style={styles.metaLabel}>Spotter A (YAMNet AudioSet):</Text>
-              <Text
-                style={[
-                  styles.metaValue,
-                  pipelineTelemetry.yamnetConfidence > 0.6
-                    ? { color: "#ef4444", fontWeight: "800" }
-                    : { color: "#94a3b8" },
-                ]}
-              >
-                {pipelineTelemetry.targetClass
-                  ? `${pipelineTelemetry.targetClass} (${(pipelineTelemetry.yamnetConfidence * 100).toFixed(0)}%)`
-                  : "Scream #11 / Yell #9 / Cry #12"}
-              </Text>
-            </View>
-
-            <View style={styles.metaStack}>
-              <Text style={styles.metaLabel}>
-                Spotter B (openWakeWord Zero-Key):
-              </Text>
-              <Text
-                style={[
-                  styles.metaValue,
-                  pipelineTelemetry.wakeWordDetected
-                    ? { color: "#a855f7", fontWeight: "800" }
-                    : { color: "#94a3b8" },
-                ]}
-              >
-                {pipelineTelemetry.wakeWordDetected
-                  ? `"${pipelineTelemetry.wakeWordDetected}" Spotted`
-                  : '"Help Me" / "Emergency" / "Hey Guardian"'}
-              </Text>
-            </View>
-
-            {/* 5s Circular Audio Ring Buffer Meter */}
-            <View style={{ marginTop: 8 }}>
-              <View style={styles.rowBetween}>
-                <Text style={styles.metaLabel}>5s Audio Ring Buffer:</Text>
-                <Text style={[styles.metaValue, { color: "#38bdf8" }]}>
-                  {pipelineTelemetry.ringBufferSeconds.toFixed(1)}s / 5.0s
-                </Text>
-              </View>
-              <View style={styles.meterTrack}>
-                <View
-                  style={[
-                    styles.meterFill,
-                    {
-                      width: `${pipelineTelemetry.ringBufferFill}%`,
-                      backgroundColor: "#38bdf8",
-                    },
-                  ]}
-                />
-              </View>
-            </View>
-
-            {/* Configurable Scream Loudness Threshold Control */}
-            <View style={{ marginTop: 8 }}>
-              <View style={styles.rowBetween}>
-                <Text style={styles.metaLabel}>Scream Loudness Sensitivity:</Text>
-                <Text style={[styles.metaValue, { color: "#f87171", fontSize: 11 }]}>
-                  Floor: {pipelineTelemetry.screamThresholdDbfs ?? -15.0} dBFS
-                </Text>
-              </View>
-              <View style={styles.buttonRowResponsive}>
-                {(["LOUD_ONLY", "MEDIUM", "SENSITIVE"] as const).map((lvl) => (
-                  <TouchableOpacity
-                    key={lvl}
-                    style={[
-                      styles.mlPill,
-                      (pipelineTelemetry.screamSensitivity || "MEDIUM") === lvl && styles.mlPillActiveRed,
-                    ]}
-                    activeOpacity={0.8}
-                    onPress={() => twoTierDistressPipeline.setScreamSensitivity(lvl)}
-                  >
-                    <Text
-                      style={[
-                        styles.mlPillText,
-                        (pipelineTelemetry.screamSensitivity || "MEDIUM") === lvl && styles.mlPillTextActiveRed,
-                      ]}
-                    >
-                      {lvl === "LOUD_ONLY" ? "LOUD (-8dB)" : lvl === "MEDIUM" ? "MED (-15dB)" : "SENSITIVE"}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            </View>
-
-            {/* Configurable WakeWord Phrase Sensitivity Control */}
-            <View style={{ marginTop: 8 }}>
-              <View style={styles.rowBetween}>
-                <Text style={styles.metaLabel}>WakeWord Voice Sensitivity:</Text>
-                <Text style={[styles.metaValue, { color: "#c084fc", fontSize: 11 }]}>
-                  Floor: {pipelineTelemetry.speechThresholdDbfs ?? -24.0} dBFS
-                </Text>
-              </View>
-              <View style={styles.buttonRowResponsive}>
-                {(["STRICT", "BALANCED", "SENSITIVE"] as const).map((lvl) => (
-                  <TouchableOpacity
-                    key={lvl}
-                    style={[
-                      styles.mlPill,
-                      (pipelineTelemetry.wakeWordSensitivity || "BALANCED") === lvl && styles.mlPillActive,
-                    ]}
-                    activeOpacity={0.8}
-                    onPress={() => twoTierDistressPipeline.setWakeWordSensitivity(lvl)}
-                  >
-                    <Text
-                      style={[
-                        styles.mlPillText,
-                        (pipelineTelemetry.wakeWordSensitivity || "BALANCED") === lvl && styles.mlPillTextActive,
-                      ]}
-                    >
-                      {lvl === "STRICT" ? "STRICT (+9dB)" : lvl === "BALANCED" ? "BALANCED" : "SENSITIVE (+2.5dB)"}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            </View>
-          </View>
-
-          {/* Speaker Biometrics & Voice Filter */}
-          <View style={[styles.subCard, styles.subCardPurple]}>
-            <View style={styles.cardHeaderRow}>
-              <View style={{ flex: 1, paddingRight: 6 }}>
-                <Text
-                  style={{ fontSize: 12, fontWeight: "700", color: "#d8b4fe" }}
-                >
-                  👤 Speaker Biometrics (16-D Centroid)
-                </Text>
-                <Text
-                  style={{ fontSize: 10, color: "#c084fc", marginTop: 1 }}
-                  numberOfLines={1}
-                >
-                  Owner:{" "}
-                  {speakerProfile?.userName || currentUser?.name || "Owner"}
-                </Text>
-              </View>
-              <View style={styles.badgeSmall}>
-                <Text style={styles.badgeSmallText}>
-                  COSINE &ge;{" "}
-                  {(speakerBiometricsService.getMatchThreshold() * 100).toFixed(
-                    0,
-                  )}
-                  %
-                </Text>
-              </View>
-            </View>
-
-            {pipelineTelemetry.liveBiometricScore !== undefined && (
-              <View style={[styles.telemetryMiniBox, { marginTop: 6 }]}>
-                <View style={styles.rowBetween}>
-                  <Text style={{ fontSize: 10, color: "#94a3b8" }}>
-                    Live Voice Similarity:
-                  </Text>
-                  <Text
-                    style={{
-                      fontSize: 10,
-                      fontWeight: "700",
-                      color:
-                        pipelineTelemetry.liveBiometricScore >=
-                        speakerBiometricsService.getMatchThreshold() * 100
-                          ? "#34d399"
-                          : "#cbd5e1",
-                    }}
-                  >
-                    {pipelineTelemetry.liveBiometricScore.toFixed(0)}% Match
-                  </Text>
-                </View>
-                <View style={[styles.meterTrack, { marginTop: 4 }]}>
-                  <View
-                    style={[
-                      styles.meterFill,
-                      {
-                        width: `${Math.min(100, Math.max(0, pipelineTelemetry.liveBiometricScore))}%`,
-                        backgroundColor:
-                          pipelineTelemetry.liveBiometricScore >=
-                          speakerBiometricsService.getMatchThreshold() * 100
-                            ? "#34d399"
-                            : "#a855f7",
-                      },
-                    ]}
-                  />
-                </View>
-              </View>
-            )}
-
-            {pipelineTelemetry.speakerBiometrics && (
-              <View style={styles.telemetryMiniBox}>
-                <Text style={{ fontSize: 10, color: "#94a3b8" }}>
-                  Latest Voice Check:
-                </Text>
-                <Text
-                  style={{
-                    fontSize: 10,
-                    fontWeight: "700",
-                    color: pipelineTelemetry.speakerBiometrics.isMatch
-                      ? "#34d399"
-                      : "#f87171",
-                  }}
-                >
-                  {pipelineTelemetry.speakerBiometrics.reason}
-                </Text>
-              </View>
-            )}
-
-            {enrollmentNotice && (
-              <View style={styles.noticeMiniBox}>
-                <Text style={styles.noticeMiniText}>✨ {enrollmentNotice}</Text>
-              </View>
-            )}
-
-            {/* Interactive 3-Step Live Voice Calibration Card */}
-            {isCalibratingVoice ? (
-              <View
-                style={{
-                  backgroundColor: "rgba(147, 51, 234, 0.15)",
-                  borderRadius: 8,
-                  padding: 10,
-                  marginTop: 8,
-                  borderWidth: 1,
-                  borderColor: "#a855f7",
-                }}
-              >
-                <View style={styles.rowBetween}>
-                  <Text
-                    style={{
-                      fontSize: 11,
-                      fontWeight: "800",
-                      color: "#f3e8ff",
-                    }}
-                  >
-                    🎙️ CALIBRATING PROMPT {calibrationStep} OF 3
-                  </Text>
-                  <Text
-                    style={{
-                      fontSize: 10,
-                      fontWeight: "700",
-                      color: "#c084fc",
-                    }}
-                  >
-                    {recordedSamplesCount}/3 Recorded
-                  </Text>
-                </View>
-
-                <View
-                  style={{
-                    backgroundColor: "rgba(0,0,0,0.3)",
-                    padding: 8,
-                    borderRadius: 6,
-                    marginVertical: 6,
-                  }}
-                >
-                  <Text
-                    style={{
-                      fontSize: 13,
-                      fontWeight: "900",
-                      color: "#38bdf8",
-                      textAlign: "center",
-                    }}
-                  >
-                    "{CALIBRATION_PROMPTS[calibrationStep - 1]?.phrase}"
-                  </Text>
-                  <Text
-                    style={{
-                      fontSize: 10,
-                      color: "#94a3b8",
-                      textAlign: "center",
-                      marginTop: 2,
-                    }}
-                  >
-                    {CALIBRATION_PROMPTS[calibrationStep - 1]?.desc}
-                  </Text>
-                </View>
-
-                {/* Live Mic Recording Progress */}
-                {isRecordingVoiceSample && (
-                  <View style={{ marginBottom: 6 }}>
-                    <Text
-                      style={{
-                        fontSize: 10,
-                        color: "#ef4444",
-                        fontWeight: "700",
-                        textAlign: "center",
-                      }}
-                    >
-                      🔴 Capturing 1.5s Audio Spectrum via Microphone...
-                    </Text>
-                    <View style={styles.meterTrack}>
-                      <View
-                        style={[
-                          styles.meterFill,
-                          { width: "100%", backgroundColor: "#ef4444" },
-                        ]}
-                      />
-                    </View>
-                  </View>
-                )}
-
-                <View style={styles.buttonRowResponsive}>
-                  <TouchableOpacity
-                    style={[
-                      styles.actionBtn,
-                      styles.actionBtnPurple,
-                      { flex: 1.5 },
-                      isRecordingVoiceSample && { opacity: 0.6 },
-                    ]}
-                    activeOpacity={0.8}
-                    disabled={isRecordingVoiceSample}
-                    onPress={handleRecordCalibrationSample}
-                  >
-                    <Text style={styles.actionBtnText}>
-                      {isRecordingVoiceSample
-                        ? "🎙️ Recording..."
-                        : `🎙️ Record Sample ${calibrationStep}`}
-                    </Text>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    style={[styles.actionBtn, { flex: 0.8 }]}
-                    activeOpacity={0.8}
-                    disabled={isRecordingVoiceSample}
-                    onPress={handleCancelVoiceCalibration}
-                  >
-                    <Text style={[styles.actionBtnText, { color: "#94a3b8" }]}>
-                      Cancel
-                    </Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-            ) : (
-              <View style={styles.buttonRowResponsive}>
-                <TouchableOpacity
-                  style={[
-                    styles.actionBtn,
-                    styles.actionBtnPurple,
-                    { flex: 1.4 },
-                  ]}
-                  activeOpacity={0.8}
-                  onPress={handleStartVoiceCalibration}
-                >
-                  <Text style={styles.actionBtnText}>
-                    🎙️ Calibrate Voice (3 Prompts)
-                  </Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={[styles.actionBtn, { flex: 1 }]}
-                  activeOpacity={0.8}
-                  onPress={() => {
-                    const currentThresh =
-                      speakerBiometricsService.getMatchThreshold();
-                    const nextThresh =
-                      currentThresh >= 0.8
-                        ? 0.65
-                        : currentThresh >= 0.72
-                          ? 0.8
-                          : 0.72;
-                    speakerBiometricsService.setMatchThreshold(nextThresh);
-                    setEnrollmentNotice(
-                      `Threshold: ${(nextThresh * 100).toFixed(0)}%`,
-                    );
-                    setTimeout(() => setEnrollmentNotice(null), 3000);
-                  }}
-                >
-                  <Text style={styles.actionBtnText}>
-                    ⚙️{" "}
-                    {(
-                      speakerBiometricsService.getMatchThreshold() * 100
-                    ).toFixed(0)}
-                    % Match
-                  </Text>
-                </TouchableOpacity>
-              </View>
-            )}
-          </View>
-
-          {/* Tier 2: Heavy Whisper Verification & NLP Intent */}
-          <View style={[styles.subCard, styles.subCardRed]}>
-            <View style={styles.rowBetween}>
-              <Text
-                style={{ fontSize: 12, fontWeight: "700", color: "#f87171" }}
-              >
-                TIER 2: Whisper ASR + NLP Intent
-              </Text>
-              <Text
-                style={{
-                  fontSize: 11,
-                  fontWeight: "800",
-                  color:
-                    pipelineTelemetry.tier2Status === "escalated"
-                      ? "#ef4444"
-                      : pipelineTelemetry.tier2Status === "transcribing"
-                        ? "#38bdf8"
-                        : "#64748b",
-                }}
-              >
-                {pipelineTelemetry.tier2Status === "transcribing"
-                  ? "🎙️ TRANSCRIBING"
-                  : pipelineTelemetry.tier2Status === "intent_verifying"
-                    ? "🧠 VERIFYING"
-                    : pipelineTelemetry.tier2Status === "escalated"
-                      ? "🚨 ESCALATED"
-                      : pipelineTelemetry.tier2Status === "rejected"
-                        ? "❌ REJECTED"
-                        : "STANDBY"}
-              </Text>
-            </View>
-
-            {pipelineTelemetry.transcript && (
-              <View style={styles.transcriptBox}>
-                <Text style={styles.transcriptText}>
-                  "{pipelineTelemetry.transcript}"
-                </Text>
-                {pipelineTelemetry.distressIntent && (
-                  <View style={styles.intentRow}>
-                    <Text style={styles.intentTag}>
-                      INTENT: [{pipelineTelemetry.distressIntent}]
-                    </Text>
-                    <Text style={styles.intentLatency}>
-                      • {pipelineTelemetry.verificationLatencyMs}ms
-                    </Text>
-                  </View>
-                )}
-              </View>
-            )}
-          </View>
-
-          {/* Test Trigger Simulations */}
-          <View style={{ marginTop: 10 }}>
-            <Text style={[styles.metaLabel, { marginBottom: 6 }]}>
-              Simulate Test Triggers:
-            </Text>
-            <View style={styles.buttonWrapRow}>
-              <TouchableOpacity
-                style={[styles.simPill, styles.simPillRed]}
-                activeOpacity={0.8}
-                onPress={() =>
-                  twoTierDistressPipeline.handleScreamSpotterEvent(
-                    0.89,
-                    "Scream",
-                  )
-                }
-              >
-                <Text style={[styles.simPillText, { color: "#fca5a5" }]}>
-                  🗣️ Scream (YAMNet)
-                </Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[styles.simPill, styles.simPillPurple]}
-                activeOpacity={0.8}
-                onPress={() =>
-                  twoTierDistressPipeline.handleWakeWordSpotterEvent(
-                    "Help Me",
-                    true,
-                  )
-                }
-              >
-                <Text style={[styles.simPillText, { color: "#d8b4fe" }]}>
-                  📢 WakeWord (Owner)
-                </Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[styles.simPill, styles.simPillGray]}
-                activeOpacity={0.8}
-                onPress={() =>
-                  twoTierDistressPipeline.handleWakeWordSpotterEvent(
-                    "Help Me",
-                    false,
-                  )
-                }
-              >
-                <Text style={[styles.simPillText, { color: "#cbd5e1" }]}>
-                  👤 Bystander (Reject)
-                </Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-
-        {/* 30-Second Audio Evidence Vault Card */}
-        <View style={styles.card}>
-          <View style={styles.cardHeaderRow}>
-            <View style={{ flex: 1, paddingRight: 8 }}>
-              <Text style={styles.cardTitle}>30s Audio Evidence Vault</Text>
-              <Text style={styles.cardDesc}>
-                {audioVault.status === "recording"
-                  ? `Recording Emergency Audio (${audioVault.remainingSeconds}s remaining)`
-                  : audioVault.status === "uploading"
-                    ? "Transmitting encrypted payload to vault..."
-                    : audioVault.status === "secured"
-                      ? "Evidence secured in Vault"
-                      : "Captures 30s audio evidence upon SOS"}
-              </Text>
-            </View>
-            <View
-              style={[
-                styles.modelStatusBadge,
-                audioVault.status === "recording"
-                  ? styles.modelStatusBadgeRed
-                  : audioVault.status === "secured"
-                    ? styles.modelStatusBadgeReady
-                    : {},
-              ]}
-            >
-              <Text
-                style={[
-                  styles.modelStatusBadgeText,
-                  audioVault.status === "recording"
-                    ? { color: "#f87171" }
-                    : audioVault.status === "secured"
-                      ? { color: "#34d399" }
-                      : {},
-                ]}
-              >
-                {audioVault.status === "recording"
-                  ? `🔴 REC ${audioVault.remainingSeconds}s`
-                  : audioVault.status === "uploading"
-                    ? "UPLOADING"
-                    : audioVault.status === "secured"
-                      ? "SECURED"
-                      : "ARMED"}
-              </Text>
-            </View>
-          </View>
-
-          {audioVault.status === "recording" && (
-            <View style={{ marginTop: 8, marginBottom: 6 }}>
-              <View style={styles.rowBetween}>
-                <Text style={styles.metaLabel}>Mic Amplitude Level:</Text>
-                <Text style={[styles.metaValue, { color: "#ef4444" }]}>
-                  {audioVault.audioMetering}% (16kHz PCM)
-                </Text>
-              </View>
-              <View style={styles.meterTrack}>
-                <View
-                  style={[
-                    styles.meterFill,
-                    {
-                      width: `${audioVault.audioMetering}%`,
-                      backgroundColor: "#ef4444",
-                    },
-                  ]}
-                />
-              </View>
-            </View>
-          )}
-
-          {audioVault.uploadedUrl && (
-            <View style={styles.vaultRefBox}>
-              <Text style={styles.vaultRefText} numberOfLines={2}>
-                🔒 Vault: {audioVault.uploadedUrl}
-              </Text>
-            </View>
-          )}
-
-          <TouchableOpacity
-            style={[
-              styles.mlToggleBtn,
-              audioVault.status === "recording" && styles.mlToggleBtnActive,
-            ]}
-            activeOpacity={0.8}
-            onPress={() => {
-              if (audioVault.status === "recording") {
-                hardwareAudioVaultService.stopAndSecure(
-                  backendUrl,
-                  authToken || undefined,
-                );
+      {/* Main Tab Content */}
+      <View style={{ flex: 1 }}>
+        {activeTab === "SHIELD" && (
+          <ShieldTab
+            batteryLevel={batteryLevel}
+            isSosActive={isSosActive}
+            dynamicConfigNotice={dynamicConfigNotice}
+            shutdownLastGaspNotice={shutdownLastGaspNotice}
+            resolutionNotice={resolutionNotice}
+            responderStatus={responderStatus}
+            nearbyAlert={nearbyAlert}
+            isVolunteer={isVolunteer}
+            handlePromptCancelSos={handlePromptCancelSos}
+            triggerDistress={triggerDistress}
+            coords={coords}
+            triggerSmsFallback={triggerSmsFallback}
+            pipelineTelemetry={pipelineTelemetry}
+            onToggleVoicePipeline={() => {
+              if (pipelineTelemetry.isPipelineActive) {
+                twoTierDistressPipeline.stopPipeline();
               } else {
-                hardwareAudioVaultService.startEvidenceCapture(
-                  incidentId || undefined,
-                  30,
-                );
+                twoTierDistressPipeline.startPipeline();
               }
             }}
+            isSnatchDetectorActive={isSnatchDetectorActive}
+            onToggleSnatchDetector={() =>
+              setIsSnatchDetectorActive(!isSnatchDetectorActive)
+            }
+            snatchSensitivity={snatchSensitivity}
+            onSetSnatchSensitivity={(lvl) => setSnatchSensitivity(lvl)}
+            audioVault={audioVault}
+            onStartAudioRecording={() => {
+              hardwareAudioVaultService.startEvidenceCapture(
+                incidentId || undefined,
+                30
+              );
+            }}
+            onStopAudioRecording={() => {
+              hardwareAudioVaultService.stopAndSecure(
+                backendUrl,
+                authToken || undefined
+              );
+            }}
+            deadmanSeconds={deadmanSeconds}
+            onSetDeadmanSeconds={(sec) => setDeadmanSeconds(sec)}
+          />
+        )}
+
+        {activeTab === "CONTACTS" && (
+          <SafeCircleTab
+            currentUser={currentUser}
+            isVolunteer={isVolunteer}
+            onToggleVolunteer={() => setIsVolunteer(!isVolunteer)}
+            coords={coords}
+            batteryLevel={batteryLevel}
+            batteryState={batteryState}
+            isLowPowerMode={isLowPowerMode}
+            isConnected={isConnected}
+            backendUrl={backendUrl}
+            pingCount={pingCount}
+            onRefreshBattery={() => {
+              hardwareBatteryService.getBatterySnapshot().then((i) => {
+                setBatteryLevel(i.level);
+                setBatteryState(i.state);
+                setIsLowPowerMode(i.isLowPowerMode);
+              });
+            }}
+            onLogout={handleLogout}
+            onTriggerSmsFallback={triggerSmsFallback}
+          />
+        )}
+
+        {activeTab === "DIAGNOSTICS" && (
+          <DiagnosticsTab
+            isConnected={isConnected}
+            backendUrl={backendUrl}
+            pingCount={pingCount}
+            pipelineTelemetry={pipelineTelemetry}
+            speakerProfile={speakerProfile}
+            currentUser={currentUser}
+            isCalibratingVoice={isCalibratingVoice}
+            calibrationStep={calibrationStep}
+            isRecordingVoiceSample={isRecordingVoiceSample}
+            recordedSamplesCount={recordedSamplesCount}
+            enrollmentNotice={enrollmentNotice}
+            calibrationPrompts={CALIBRATION_PROMPTS}
+            onStartVoiceCalibration={handleStartVoiceCalibration}
+            onRecordCalibrationSample={handleRecordCalibrationSample}
+            onCancelVoiceCalibration={handleCancelVoiceCalibration}
+            onChangeBiometricThreshold={() => {
+              const currentThresh = speakerBiometricsService.getMatchThreshold();
+              const nextThresh =
+                currentThresh >= 0.8
+                  ? 0.65
+                  : currentThresh >= 0.72
+                    ? 0.8
+                    : 0.72;
+              speakerBiometricsService.setMatchThreshold(nextThresh);
+              setEnrollmentNotice(
+                `Threshold: ${(nextThresh * 100).toFixed(0)}%`
+              );
+              setTimeout(() => setEnrollmentNotice(null), 3000);
+            }}
+            onSetScreamSensitivity={(lvl) =>
+              twoTierDistressPipeline.setScreamSensitivity(lvl)
+            }
+            onSetWakeWordSensitivity={(lvl) =>
+              twoTierDistressPipeline.setWakeWordSensitivity(lvl)
+            }
+            onSimulateScream={() =>
+              twoTierDistressPipeline.handleScreamSpotterEvent(0.89, "Scream")
+            }
+            onSimulateWakeWordOwner={() =>
+              twoTierDistressPipeline.handleWakeWordSpotterEvent("Help Me", true)
+            }
+            onSimulateWakeWordBystander={() =>
+              twoTierDistressPipeline.handleWakeWordSpotterEvent("Help Me", false)
+            }
+            motionTelemetry={motionTelemetry}
+            isSnatchDetectorActive={isSnatchDetectorActive}
+            onToggleSnatchDetector={() =>
+              setIsSnatchDetectorActive(!isSnatchDetectorActive)
+            }
+            snatchSensitivity={snatchSensitivity}
+            onSetSnatchSensitivity={(lvl) => setSnatchSensitivity(lvl)}
+            onSimulateSnatchJerk={() => hardwareSnatchService.simulateSnatchJerk()}
+            isHardwareGps={isHardwareGps}
+            onToggleGpsMode={() => setIsHardwareGps(!isHardwareGps)}
+            coords={coords}
+            locationAccuracy={locationAccuracy}
+            locationSpeed={locationSpeed}
+            onForceGpsPoll={async () => {
+              const fix = await hardwareLocationService.forceRefreshLocation();
+              if (fix && fix.lat !== 0) {
+                setCoords({ lat: fix.lat, lng: fix.lng });
+                if (fix.accuracy) setLocationAccuracy(fix.accuracy);
+                if (fix.speed) setLocationSpeed(fix.speed);
+              }
+            }}
+            isSimulatedOffline={isSimulatedOffline}
+            onToggleDropNetwork={() =>
+              setIsSimulatedOffline(!isSimulatedOffline)
+            }
+            offlineQueueLength={offlineQueue.length}
+            lastTransmissionMethod={lastTransmissionMethod}
+            onSimulateShutdown={handleSimulatedDeviceShutdown}
+          />
+        )}
+      </View>
+
+      {/* Docked Citizen Bottom Tab Navigation Bar */}
+      <View style={styles.bottomTabBar}>
+        <TouchableOpacity
+          style={[
+            styles.tabButton,
+            activeTab === "SHIELD" && styles.tabButtonActive,
+          ]}
+          onPress={() => setActiveTab("SHIELD")}
+          activeOpacity={0.8}
+        >
+          <Text style={styles.tabIcon}>🛡️</Text>
+          <Text
+            style={[
+              styles.tabLabel,
+              activeTab === "SHIELD" && styles.tabLabelActive,
+            ]}
           >
-            <Text style={styles.mlToggleBtnText}>
-              {audioVault.status === "recording"
-                ? "⏹️ Stop & Transmit to Vault"
-                : "🎙️ Record 30s Audio Evidence"}
-            </Text>
-          </TouchableOpacity>
-        </View>
+            Shield
+          </Text>
+        </TouchableOpacity>
 
-        {/* Network & Battery Resiliency Card */}
-        <View style={styles.card}>
-          <View style={styles.cardHeaderRow}>
-            <Text style={styles.cardTitle}>Network & Battery Armor</Text>
-            <View
-              style={{ flexDirection: "row", alignItems: "center", gap: 6 }}
-            >
-              {isLowPowerMode && (
-                <View style={styles.badgeSmallOrange}>
-                  <Text style={styles.badgeSmallOrangeText}>LOW POWER</Text>
-                </View>
-              )}
-              <Text
-                style={{
-                  fontSize: 11,
-                  fontWeight: "700",
-                  color: batteryState === "CHARGING" ? "#10b981" : "#94a3b8",
-                }}
-              >
-                {batteryState === "CHARGING"
-                  ? "⚡ CHARGING"
-                  : batteryState === "FULL"
-                    ? "🔋 FULL"
-                    : "🔋 UNPLUGGED"}
-              </Text>
-            </View>
-          </View>
-
-          <View style={styles.rowBetween}>
-            <Text style={styles.metaLabel}>Battery Level:</Text>
-            <Text
-              style={[
-                styles.metaValue,
-                batteryLevel <= 10
-                  ? { color: "#ef4444" }
-                  : { color: "#10b981" },
-              ]}
-            >
-              {Math.round(batteryLevel)}%{" "}
-              {batteryLevel <= 5 ? "(Last Gasp)" : ""}
-            </Text>
-          </View>
-
-          <View style={styles.buttonWrapRow}>
-            <TouchableOpacity
-              style={styles.battBtn}
-              activeOpacity={0.75}
-              onPress={() => {
-                hardwareBatteryService
-                  .getBatterySnapshot()
-                  .then((i) => {
-                    setBatteryLevel(i.level);
-                    setBatteryState(i.state);
-                    setIsLowPowerMode(i.isLowPowerMode);
-                  });
-              }}
-            >
-              <Text style={styles.battBtnText}>🔄 Refresh Hardware Battery</Text>
-            </TouchableOpacity>
-          </View>
-
-          <View style={styles.divider} />
-
-          <TouchableOpacity
-            style={styles.shutdownSimBtn}
-            activeOpacity={0.8}
-            onPress={handleSimulatedDeviceShutdown}
+        <TouchableOpacity
+          style={[
+            styles.tabButton,
+            activeTab === "CONTACTS" && styles.tabButtonActive,
+          ]}
+          onPress={() => setActiveTab("CONTACTS")}
+          activeOpacity={0.8}
+        >
+          <Text style={styles.tabIcon}>👥</Text>
+          <Text
+            style={[
+              styles.tabLabel,
+              activeTab === "CONTACTS" && styles.tabLabelActive,
+            ]}
           >
-            <Text style={styles.shutdownSimBtnText}>
-              ⚡ Simulate Sudden OS Shutdown (Pre-Shutdown Hook)
-            </Text>
-          </TouchableOpacity>
-
-          <View style={styles.divider} />
-
-          <View style={styles.metaStack}>
-            <Text style={styles.metaLabel}>Transmission Pipeline:</Text>
-            <Text style={styles.metaValue} numberOfLines={1}>
-              {lastTransmissionMethod}
-            </Text>
-          </View>
-
-          <View style={styles.rowBetween}>
-            <Text style={styles.metaLabel}>Offline Queue:</Text>
-            <Text
-              style={[
-                styles.metaValue,
-                offlineQueue.length > 0 ? { color: "#f97316" } : {},
-              ]}
-            >
-              {offlineQueue.length} Pings Buffered
-            </Text>
-          </View>
-
-          <View style={styles.buttonRowResponsive}>
-            <TouchableOpacity
-              style={[
-                styles.actionBtn,
-                isSimulatedOffline && styles.actionBtnRed,
-                { flex: 1 },
-              ]}
-              activeOpacity={0.8}
-              onPress={() => setIsSimulatedOffline(!isSimulatedOffline)}
-            >
-              <Text style={styles.actionBtnText}>
-                {isSimulatedOffline ? "📶 Reconnect" : "❌ Drop Network"}
-              </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[styles.actionBtn, styles.actionBtnBlue, { flex: 1 }]}
-              activeOpacity={0.8}
-              onPress={() => {
-                if (coords) {
-                  triggerSmsFallback(
-                    coords.lat,
-                    coords.lng,
-                    Math.round(batteryLevel),
-                  );
-                }
-              }}
-            >
-              <Text style={[styles.actionBtnText, { color: "#93c5fd" }]}>
-                📱 Emergency SMS
-              </Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-
-        {/* Live GPS Telemetry Card */}
-        <View style={styles.card}>
-          <View style={styles.cardHeaderRow}>
-            <Text style={styles.cardTitle}>Live Geospatial GPS</Text>
-            <Text
-              style={{
-                fontSize: 11,
-                fontWeight: "700",
-                color: isHardwareGps ? "#10b981" : "#f59e0b",
-              }}
-            >
-              {isHardwareGps ? "🛰️ HARDWARE GPS" : "🎮 SIMULATED"}
-            </Text>
-          </View>
-
-          <View style={styles.rowBetween}>
-            <Text style={styles.metaLabel}>Coordinates:</Text>
-            <Text style={styles.metaValue}>
-              {coords && (coords.lat !== 0 || coords.lng !== 0)
-                ? `${coords.lat.toFixed(5)}, ${coords.lng.toFixed(5)}`
-                : "🛰️ Acquiring GPS..."}
-            </Text>
-          </View>
-
-          <View style={styles.rowBetween}>
-            <Text style={styles.metaLabel}>Accuracy:</Text>
-            <Text
-              style={[
-                styles.metaValue,
-                {
-                  color:
-                    locationAccuracy && locationAccuracy < 10
-                      ? "#10b981"
-                      : "#38bdf8",
-                },
-              ]}
-            >
-              {locationAccuracy
-                ? `±${locationAccuracy.toFixed(1)}m`
-                : "Fixing..."}
-            </Text>
-          </View>
-
-          {locationSpeed !== null && locationSpeed !== undefined && (
-            <View style={styles.rowBetween}>
-              <Text style={styles.metaLabel}>Speed:</Text>
-              <Text style={styles.metaValue}>
-                {(locationSpeed * 3.6).toFixed(1)} km/h
-              </Text>
-            </View>
-          )}
-
-          <View style={styles.rowBetween}>
-            <Text style={styles.metaLabel}>Streamed Pings:</Text>
-            <Text style={styles.metaValue}>{pingCount} updates</Text>
-          </View>
-
-          <View style={styles.buttonRowResponsive}>
-            <TouchableOpacity
-              style={[styles.actionBtn, { flex: 1 }]}
-              activeOpacity={0.8}
-              onPress={async () => {
-                const fix =
-                  await hardwareLocationService.forceRefreshLocation();
-                if (fix && fix.lat !== 0) {
-                  setCoords({ lat: fix.lat, lng: fix.lng });
-                  if (fix.accuracy) setLocationAccuracy(fix.accuracy);
-                  if (fix.speed) setLocationSpeed(fix.speed);
-                }
-              }}
-            >
-              <Text style={styles.actionBtnText}>🔄 Force GPS Poll</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[styles.actionBtn, styles.actionBtnPurple, { flex: 1.2 }]}
-              activeOpacity={0.8}
-              onPress={() => setIsHardwareGps(!isHardwareGps)}
-            >
-              <Text style={[styles.actionBtnText, { color: "#d8b4fe" }]}>
-                {isHardwareGps ? "Switch to Sim GPS" : "Switch to Real GPS"}
-              </Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-
-        {/* Device Snatch Accelerometer Card */}
-        <View style={styles.card}>
-          <View style={styles.cardHeaderRow}>
-            <Text style={styles.cardTitle}>Device Snatch Armor</Text>
-            <Text
-              style={{
-                fontSize: 11,
-                fontWeight: "700",
-                color: isSnatchDetectorActive ? "#10b981" : "#64748b",
-              }}
-            >
-              {isSnatchDetectorActive ? "⚡ 20 Hz ACTIVE" : "PAUSED"}
-            </Text>
-          </View>
-
-          {motionTelemetry && (
-            <View style={{ marginTop: 6, marginBottom: 8 }}>
-              <View style={styles.rowBetween}>
-                <Text style={styles.metaLabel}>G-Force Magnitude:</Text>
-                <Text
-                  style={[
-                    styles.metaValue,
-                    motionTelemetry.isSpike
-                      ? { color: "#ef4444", fontWeight: "900" }
-                      : { color: "#38bdf8" },
-                  ]}
-                >
-                  {motionTelemetry.magnitude.toFixed(2)} G{" "}
-                  {motionTelemetry.isSpike ? "💥 SPIKE!" : ""}
-                </Text>
-              </View>
-
-              <View style={styles.rowBetween}>
-                <Text style={styles.metaLabel}>Vector [X, Y, Z]:</Text>
-                <Text style={[styles.metaValue, { fontSize: 11 }]}>
-                  [{motionTelemetry.x.toFixed(1)},{" "}
-                  {motionTelemetry.y.toFixed(1)}, {motionTelemetry.z.toFixed(1)}
-                  ]
-                </Text>
-              </View>
-
-              <View style={styles.meterTrack}>
-                <View
-                  style={[
-                    styles.meterFill,
-                    {
-                      width: `${Math.min(100, (motionTelemetry.magnitude / 5.0) * 100)}%`,
-                    },
-                    motionTelemetry.isSpike && styles.meterFillAlert,
-                  ]}
-                />
-              </View>
-            </View>
-          )}
-
-          <Text style={[styles.metaLabel, { marginBottom: 6 }]}>
-            Snatch Sensitivity:
+            Safe Circle
           </Text>
-          <View style={styles.buttonRowResponsive}>
-            {(["LOW", "MEDIUM", "HIGH"] as const).map((lvl) => (
-              <TouchableOpacity
-                key={lvl}
-                style={[
-                  styles.mlPill,
-                  snatchSensitivity === lvl && styles.mlPillActive,
-                ]}
-                activeOpacity={0.8}
-                onPress={() => setSnatchSensitivity(lvl)}
-              >
-                <Text
-                  style={[
-                    styles.mlPillText,
-                    snatchSensitivity === lvl && styles.mlPillTextActive,
-                  ]}
-                >
-                  {lvl}{" "}
-                  {lvl === "LOW"
-                    ? "(4.2G)"
-                    : lvl === "MEDIUM"
-                      ? "(3.2G)"
-                      : "(2.2G)"}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </View>
+        </TouchableOpacity>
 
-          <View style={[styles.buttonRowResponsive, { marginTop: 10 }]}>
-            <TouchableOpacity
-              style={[styles.actionBtn, styles.actionBtnRed, { flex: 1 }]}
-              activeOpacity={0.8}
-              onPress={() => hardwareSnatchService.simulateSnatchJerk()}
-            >
-              <Text style={[styles.actionBtnText, { color: "#fda4af" }]}>
-                📱 Simulate Snatch Jerk
-              </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[styles.actionBtn, { flex: 1 }]}
-              activeOpacity={0.8}
-              onPress={() => setIsSnatchDetectorActive(!isSnatchDetectorActive)}
-            >
-              <Text style={styles.actionBtnText}>
-                {isSnatchDetectorActive ? "🛑 Pause" : "▶️ Resume"}
-              </Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-
-        {/* Dead Man's Switch Timer Card */}
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Dead Man's Switch Timer</Text>
-          <Text style={styles.cardDesc}>
-            Triggers automatic SOS if check-in expires before timer completes.
+        <TouchableOpacity
+          style={[
+            styles.tabButton,
+            activeTab === "DIAGNOSTICS" && styles.tabButtonActive,
+          ]}
+          onPress={() => setActiveTab("DIAGNOSTICS")}
+          activeOpacity={0.8}
+        >
+          <Text style={styles.tabIcon}>⚡</Text>
+          <Text
+            style={[
+              styles.tabLabel,
+              activeTab === "DIAGNOSTICS" && styles.tabLabelActive,
+            ]}
+          >
+            Diagnostics
           </Text>
-          {deadmanSeconds ? (
-            <View style={styles.timerActiveRow}>
-              <Text style={styles.timerCountdown}>
-                ⏰ {deadmanSeconds}s Remaining
-              </Text>
-              <TouchableOpacity
-                style={styles.timerCancelBtn}
-                activeOpacity={0.8}
-                onPress={() => setDeadmanSeconds(null)}
-              >
-                <Text style={styles.timerCancelText}>Disarm</Text>
-              </TouchableOpacity>
-            </View>
-          ) : (
-            <View style={styles.buttonRowResponsive}>
-              {[30, 60, 300].map((sec) => (
-                <TouchableOpacity
-                  key={sec}
-                  style={styles.presetBtn}
-                  activeOpacity={0.8}
-                  onPress={() => setDeadmanSeconds(sec)}
-                >
-                  <Text style={styles.presetBtnText}>
-                    {sec >= 60 ? `${sec / 60} min` : `${sec}s`}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          )}
-        </View>
-
-        {/* Volunteer Sentinel Mesh Toggle */}
-        <View style={styles.card}>
-          <View style={styles.cardHeaderRow}>
-            <View style={{ flex: 1, paddingRight: 8 }}>
-              <Text style={styles.cardTitle}>Community Sentinel Mesh</Text>
-              <Text style={styles.cardDesc}>
-                Receive silent alerts when someone within 500m triggers an SOS
-              </Text>
-            </View>
-            <TouchableOpacity
-              style={[
-                styles.volunteerToggle,
-                isVolunteer && styles.volunteerToggleActive,
-              ]}
-              activeOpacity={0.8}
-              onPress={() => setIsVolunteer(!isVolunteer)}
-            >
-              <Text style={styles.volunteerToggleText}>
-                {isVolunteer ? "ON" : "OFF"}
-              </Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </ScrollView>
+        </TouchableOpacity>
+      </View>
 
       {/* Disarm / Cancel SOS Confirmation Modal */}
       <Modal
@@ -3127,47 +2155,90 @@ const styles = StyleSheet.create({
   },
   calcContainer: {
     flex: 1,
-    backgroundColor: "#000",
-    padding: 16,
+    backgroundColor: "#000000",
+    paddingHorizontal: 16,
+    paddingBottom: 24,
     justifyContent: "flex-end",
   },
   calcDisplay: {
-    padding: 16,
+    paddingHorizontal: 12,
+    marginBottom: 20,
+    justifyContent: "flex-end",
     alignItems: "flex-end",
-    marginBottom: 16,
+    minHeight: 90,
   },
   calcDisplayText: {
-    color: "#fff",
-    fontSize: 44,
+    color: "#ffffff",
+    fontSize: 64,
     fontWeight: "300",
+    textAlign: "right",
   },
   calcGrid: {
+    width: "100%",
+  },
+  calcRow: {
     flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 10,
-    justifyContent: "center",
+    justifyContent: "space-between",
+    marginBottom: 12,
   },
   calcBtn: {
-    width: "21%",
+    width: "22%",
     aspectRatio: 1,
-    borderRadius: 40,
-    backgroundColor: "#333",
+    borderRadius: 45,
+    backgroundColor: "#333333",
     alignItems: "center",
     justifyContent: "center",
   },
-  calcBtnEqual: {
+  calcBtnZero: {
+    width: "47%",
+    aspectRatio: 2.15,
+    borderRadius: 45,
+    paddingLeft: 28,
+    alignItems: "flex-start",
+    justifyContent: "center",
+  },
+  calcBtnFunc: {
+    backgroundColor: "#a5a5a5",
+  },
+  calcBtnOp: {
     backgroundColor: "#ff9f0a",
   },
   calcBtnText: {
-    color: "#fff",
-    fontSize: 22,
-    fontWeight: "600",
+    color: "#ffffff",
+    fontSize: 30,
+    fontWeight: "400",
+  },
+  calcBtnFuncText: {
+    color: "#000000",
+    fontWeight: "500",
+    fontSize: 26,
+  },
+  calcBtnOpText: {
+    color: "#ffffff",
+    fontSize: 32,
+    fontWeight: "500",
+  },
+  calcNoticeBox: {
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    backgroundColor: "rgba(16, 185, 129, 0.2)",
+    borderRadius: 6,
+    alignSelf: "center",
+    marginTop: 8,
+    borderWidth: 1,
+    borderColor: "rgba(16, 185, 129, 0.4)",
+  },
+  calcNoticeText: {
+    color: "#34d399",
+    fontSize: 12,
+    fontWeight: "700",
+    textAlign: "center",
   },
   calcHint: {
-    color: "#555",
+    color: "#334155",
     fontSize: 11,
     textAlign: "center",
-    marginTop: 18,
+    marginTop: 12,
   },
   citizenProfileCard: {
     backgroundColor: "rgba(30, 41, 59, 0.5)",
@@ -3288,5 +2359,42 @@ const styles = StyleSheet.create({
     color: "#64748b",
     fontSize: 13,
     fontWeight: "700",
+  },
+  bottomTabBar: {
+    flexDirection: "row",
+    backgroundColor: "#0b101b",
+    borderTopWidth: 1,
+    borderTopColor: "rgba(255, 255, 255, 0.08)",
+    paddingVertical: 8,
+    paddingHorizontal: 8,
+    justifyContent: "space-around",
+    alignItems: "center",
+  },
+  tabButton: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 6,
+    paddingHorizontal: 8,
+    borderRadius: 10,
+    marginHorizontal: 4,
+  },
+  tabButtonActive: {
+    backgroundColor: "rgba(56, 189, 248, 0.12)",
+    borderWidth: 1,
+    borderColor: "rgba(56, 189, 248, 0.3)",
+  },
+  tabIcon: {
+    fontSize: 18,
+    marginBottom: 2,
+  },
+  tabLabel: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#64748b",
+  },
+  tabLabelActive: {
+    color: "#38bdf8",
+    fontWeight: "800",
   },
 });
