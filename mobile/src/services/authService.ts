@@ -133,3 +133,37 @@ export function clearStoredCitizenAuth(): void {
     localStorage.removeItem(USER_KEY);
   }
 }
+
+const BACKEND_URL_KEY = 'guardian_backend_url';
+let memoryBackendUrl: string | null = null;
+
+export function normalizeBackendUrl(rawUrl: string): string {
+  let trimmed = rawUrl.trim().replace(/\/+$/, '');
+  if (!trimmed) return 'http://10.122.65.208:3000';
+  if (!/^https?:\/\//i.test(trimmed)) {
+    trimmed = `http://${trimmed}`;
+  }
+  const withoutProtocol = trimmed.replace(/^https?:\/\//i, '');
+  if (!withoutProtocol.includes(':') && !withoutProtocol.includes('/')) {
+    trimmed = `${trimmed}:3000`;
+  }
+  return trimmed;
+}
+
+export function getStoredBackendUrl(): string {
+  if (Platform.OS === 'web' && typeof localStorage !== 'undefined') {
+    const saved = localStorage.getItem(BACKEND_URL_KEY);
+    if (saved && saved.trim()) return normalizeBackendUrl(saved);
+  }
+  if (memoryBackendUrl) return memoryBackendUrl;
+  return 'http://10.122.65.208:3000';
+}
+
+export function setStoredBackendUrl(url: string): void {
+  const normalized = normalizeBackendUrl(url);
+  memoryBackendUrl = normalized;
+  if (Platform.OS === 'web' && typeof localStorage !== 'undefined') {
+    localStorage.setItem(BACKEND_URL_KEY, normalized);
+  }
+}
+

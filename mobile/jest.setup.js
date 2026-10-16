@@ -135,6 +135,8 @@ jest.mock('expo-modules-core', () => ({
         startSpotter: jest.fn().mockResolvedValue(true),
         stopSpotter: jest.fn().mockResolvedValue(true),
         isSpotterRunning: jest.fn().mockReturnValue(true),
+        setBackendConfig: jest.fn().mockResolvedValue(true),
+        setScreamSensitivity: jest.fn().mockResolvedValue(true),
         addListener: jest.fn().mockReturnValue({ remove: jest.fn() }),
         removeListeners: jest.fn(),
       };

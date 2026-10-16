@@ -18,6 +18,7 @@ enum class SpotterState {
 
 interface AudioCoordinatorListener {
     fun onMeteringUpdate(dbfs: Double, rms: Double)
+    fun onScreamDetected(dbfs: Double, rms: Double)
     fun onStateChange(state: SpotterState)
     fun onError(message: String)
 }
@@ -37,6 +38,13 @@ object AudioHardwareCoordinator {
     private val coordinatorScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
 
     var listener: AudioCoordinatorListener? = null
+
+    // Native Background Acoustic Sentinel state
+    var screamSensitivity: String = "MEDIUM"
+    private var ambientNoiseDbfs: Double = -55.0
+    private var calibrationFrames: Int = 0
+    private var sustainedHighEnergyFrames: Int = 0
+    private var lastScreamTriggerTime: Long = 0L
 
     fun getState(): SpotterState = currentState.get()
 
@@ -142,6 +150,46 @@ object AudioHardwareCoordinator {
                             (20.0 * log10(rms / 32768.0)).coerceIn(-100.0, 0.0)
                         } else {
                             -100.0
+                        }
+
+                        // 1. Adaptive Ambient Floor Tracking
+                        if (calibrationFrames < 30) {
+                            calibrationFrames++
+                            ambientNoiseDbfs = ambientNoiseDbfs * 0.85 + dbfs * 0.15
+                        } else if (dbfs < ambientNoiseDbfs + 6.0) {
+                            ambientNoiseDbfs = ambientNoiseDbfs * 0.98 + dbfs * 0.02
+                        }
+
+                        // 2. Dynamic thresholds based on sensitivity (supports presets & numeric thresholds from admin)
+                        val (screamFloorDbfs, minFrames) = when (screamSensitivity) {
+                            "LOUD_ONLY" -> Pair(maxOf(-15.0, ambientNoiseDbfs + 18.0), 5)
+                            "SENSITIVE" -> Pair(maxOf(-24.0, ambientNoiseDbfs + 6.0), 3)
+                            "MEDIUM" -> Pair(maxOf(-18.0, ambientNoiseDbfs + 12.0), 4)
+                            else -> {
+                                val numeric = screamSensitivity.toDoubleOrNull()
+                                if (numeric != null) {
+                                    val delta = if (numeric in 0.0..1.0) 6.0 + (numeric * 14.0) else numeric
+                                    val frames = if (numeric >= 0.85) 5 else if (numeric <= 0.73) 3 else 4
+                                    Pair(ambientNoiseDbfs + delta, frames)
+                                } else {
+                                    Pair(maxOf(-18.0, ambientNoiseDbfs + 12.0), 4)
+                                }
+                            }
+                        }
+
+                        // 3. Native Background Acoustic Scream Spotting (Works even when screen is locked & JS is paused)
+                        if (dbfs >= screamFloorDbfs) {
+                            sustainedHighEnergyFrames++
+                            if (sustainedHighEnergyFrames >= minFrames) {
+                                val now = System.currentTimeMillis()
+                                if (now - lastScreamTriggerTime > 3500L) {
+                                    lastScreamTriggerTime = now
+                                    Log.w(TAG, "🚨 [NATIVE SENTINEL] Background acoustic scream detected! dBFS: $dbfs >= $screamFloorDbfs (ambient: $ambientNoiseDbfs)")
+                                    listener?.onScreamDetected(dbfs, rms)
+                                }
+                            }
+                        } else {
+                            sustainedHighEnergyFrames = maxOf(0, sustainedHighEnergyFrames - 2)
                         }
 
                         listener?.onMeteringUpdate(dbfs, rms)

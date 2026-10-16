@@ -6,9 +6,17 @@ export interface MeteringPayload {
   rms: number;  // Linear RMS amplitude
 }
 
+export interface NativeDistressPayload {
+  triggerType: string;
+  dbfs: number;
+  rms?: number;
+  reason?: string;
+}
+
 export type SpotterState = 'IDLE' | 'LISTENING' | 'PREEMPTED';
 
 export type MeteringListener = (payload: MeteringPayload) => void;
+export type NativeDistressListener = (payload: NativeDistressPayload) => void;
 export type StateChangeListener = (state: SpotterState) => void;
 export type ErrorListener = (error: string) => void;
 
@@ -78,9 +86,11 @@ export class AudioResourceCoordinator {
   private static instance: AudioResourceCoordinator | null = null;
   private isSpotterRunningState: boolean = false;
   private activeListeners: Set<MeteringListener> = new Set();
+  private distressListeners: Set<NativeDistressListener> = new Set();
   private stateListeners: Set<StateChangeListener> = new Set();
   private errorListeners: Set<ErrorListener> = new Set();
   private meteringSub: EventSubscription | null = null;
+  private distressSub: EventSubscription | null = null;
   private stateSub: EventSubscription | null = null;
   private errorSub: EventSubscription | null = null;
 
@@ -103,6 +113,13 @@ export class AudioResourceCoordinator {
         'onMeteringUpdate',
         (payload: MeteringPayload) => {
           this.activeListeners.forEach((l) => l(payload));
+        }
+      );
+
+      this.distressSub = GuardianAudioModule.addListener(
+        'onNativeDistressTriggered',
+        (payload: NativeDistressPayload) => {
+          this.distressListeners.forEach((l) => l(payload));
         }
       );
 
@@ -131,6 +148,27 @@ export class AudioResourceCoordinator {
   public subscribeMetering(listener: MeteringListener): () => void {
     this.activeListeners.add(listener);
     return () => this.activeListeners.delete(listener);
+  }
+
+  public subscribeDistressTrigger(listener: NativeDistressListener): () => void {
+    this.distressListeners.add(listener);
+    return () => this.distressListeners.delete(listener);
+  }
+
+  public setBackendConfig(url: string, token?: string | null): void {
+    if (Platform.OS === 'android' && GuardianAudioModule && typeof GuardianAudioModule.setBackendConfig === 'function') {
+      GuardianAudioModule.setBackendConfig(url, token || null).catch((e: any) => {
+        console.warn('[GuardianAudio] setBackendConfig note:', e?.message);
+      });
+    }
+  }
+
+  public setScreamSensitivity(level: string): void {
+    if (Platform.OS === 'android' && GuardianAudioModule && typeof GuardianAudioModule.setScreamSensitivity === 'function') {
+      GuardianAudioModule.setScreamSensitivity(level).catch((e: any) => {
+        console.warn('[GuardianAudio] setScreamSensitivity note:', e?.message);
+      });
+    }
   }
 
   public subscribeStateChange(listener: StateChangeListener): () => void {

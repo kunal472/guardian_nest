@@ -14,6 +14,8 @@ import {
   loginCitizen,
   registerCitizen,
   CitizenUser,
+  normalizeBackendUrl,
+  setStoredBackendUrl,
 } from "../services/authService";
 
 interface CitizenAuthProps {
@@ -51,26 +53,29 @@ export const CitizenAuth: React.FC<CitizenAuthProps> = ({
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
-  const testConnection = async () => {
+  const testConnection = async (targetUrl?: string) => {
     setIsTestingPing(true);
     setPingStatus(null);
     try {
-      const trimmed = customUrl.trim().replace(/\/$/, "");
+      const urlToTest = normalizeBackendUrl(targetUrl || customUrl || backendUrl);
+      setCustomUrl(urlToTest);
+      setStoredBackendUrl(urlToTest);
+      if (onUpdateBackendUrl) onUpdateBackendUrl(urlToTest);
+
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 4000);
-      const res = await fetch(`${trimmed}/api/incidents`, {
+      const res = await fetch(`${urlToTest}/api/incidents`, {
         method: "GET",
         signal: controller.signal,
       }).catch((e) => {
         throw new Error(
-          `Cannot reach ${trimmed}: ${e?.message || "Network error"}`,
+          `Cannot reach ${urlToTest}: ${e?.message || "Network error"}`,
         );
       });
       clearTimeout(timeout);
-      if (onUpdateBackendUrl) onUpdateBackendUrl(trimmed);
       setPingStatus({
         ok: true,
-        msg: `Connected to ${trimmed} (HTTP ${res.status})`,
+        msg: `Connected to ${urlToTest} (HTTP ${res.status})`,
       });
     } catch (err: any) {
       setPingStatus({ ok: false, msg: err?.message || "Server unreachable" });
@@ -83,7 +88,9 @@ export const CitizenAuth: React.FC<CitizenAuthProps> = ({
     setErrorMsg(null);
     setSuccessMsg(null);
 
-    const activeUrl = customUrl.trim().replace(/\/$/, "") || backendUrl;
+    const activeUrl = normalizeBackendUrl(customUrl || backendUrl);
+    setCustomUrl(activeUrl);
+    setStoredBackendUrl(activeUrl);
     if (onUpdateBackendUrl && activeUrl !== backendUrl) {
       onUpdateBackendUrl(activeUrl);
     }
@@ -178,14 +185,14 @@ export const CitizenAuth: React.FC<CitizenAuthProps> = ({
                 setPingStatus(null);
                 if (onUpdateBackendUrl) onUpdateBackendUrl(text.trim());
               }}
-              placeholder="http://192.168.1.X:3000"
+              placeholder="e.g. 10.122.65.208:3000"
               placeholderTextColor="#64748b"
               autoCapitalize="none"
               autoCorrect={false}
             />
             <TouchableOpacity
               style={styles.serverPingBtn}
-              onPress={testConnection}
+              onPress={() => testConnection()}
               disabled={isTestingPing}
               activeOpacity={0.8}
             >
@@ -196,6 +203,39 @@ export const CitizenAuth: React.FC<CitizenAuthProps> = ({
               )}
             </TouchableOpacity>
           </View>
+
+          {/* Quick IP Presets */}
+          <View style={styles.ipPresetsRow}>
+            <Text style={styles.ipPresetsLabel}>Presets:</Text>
+            {[
+              { label: "📶 Wi-Fi IP", url: "http://10.122.65.208:3000" },
+              { label: "🤖 Emul (10.0.2.2)", url: "http://10.0.2.2:3000" },
+              { label: "💻 Localhost", url: "http://localhost:3000" },
+            ].map((preset) => (
+              <TouchableOpacity
+                key={preset.url}
+                style={[
+                  styles.ipPresetChip,
+                  customUrl === preset.url && styles.ipPresetChipActive,
+                ]}
+                onPress={() => {
+                  setCustomUrl(preset.url);
+                  testConnection(preset.url);
+                }}
+                activeOpacity={0.7}
+              >
+                <Text
+                  style={[
+                    styles.ipPresetChipText,
+                    customUrl === preset.url && styles.ipPresetChipTextActive,
+                  ]}
+                >
+                  {preset.label}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+
           {pingStatus && (
             <Text
               style={[
@@ -569,6 +609,39 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: "600",
     marginTop: 6,
+  },
+  ipPresetsRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    flexWrap: "wrap",
+    gap: 6,
+    marginTop: 8,
+  },
+  ipPresetsLabel: {
+    fontSize: 10,
+    fontWeight: "700",
+    color: "#64748b",
+    marginRight: 2,
+  },
+  ipPresetChip: {
+    backgroundColor: "rgba(255, 255, 255, 0.05)",
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.1)",
+  },
+  ipPresetChipActive: {
+    backgroundColor: "rgba(56, 189, 248, 0.2)",
+    borderColor: "#38bdf8",
+  },
+  ipPresetChipText: {
+    fontSize: 10,
+    fontWeight: "700",
+    color: "#94a3b8",
+  },
+  ipPresetChipTextActive: {
+    color: "#38bdf8",
   },
   tabBar: {
     flexDirection: "row",

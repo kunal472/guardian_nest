@@ -23,6 +23,7 @@ export interface SafeCircleTabProps {
   onRefreshBattery: () => void;
   onLogout: () => void;
   onTriggerSmsFallback: (lat: number, lng: number, batt: number) => void;
+  onOpenServerModal?: () => void;
 }
 
 export const SafeCircleTab: React.FC<SafeCircleTabProps> = ({
@@ -39,6 +40,7 @@ export const SafeCircleTab: React.FC<SafeCircleTabProps> = ({
   onRefreshBattery,
   onLogout,
   onTriggerSmsFallback,
+  onOpenServerModal,
 }) => {
   return (
     <ScrollView
@@ -204,10 +206,32 @@ export const SafeCircleTab: React.FC<SafeCircleTabProps> = ({
 
         <View style={styles.healthRow}>
           <Text style={styles.healthLabel}>Endpoint:</Text>
-          <Text style={[styles.healthValue, { fontSize: 11 }]} numberOfLines={1}>
-            {backendUrl}
-          </Text>
+          <TouchableOpacity
+            style={{ flexDirection: "row", alignItems: "center", gap: 6 }}
+            onPress={onOpenServerModal}
+            disabled={!onOpenServerModal}
+            activeOpacity={0.7}
+          >
+            <Text style={[styles.healthValue, { fontSize: 11, color: onOpenServerModal ? "#38bdf8" : "#cbd5e1" }]} numberOfLines={1}>
+              {backendUrl}
+            </Text>
+            {onOpenServerModal && (
+              <View style={styles.editIpTag}>
+                <Text style={styles.editIpTagText}>⚙️ Edit</Text>
+              </View>
+            )}
+          </TouchableOpacity>
         </View>
+
+        {onOpenServerModal && (
+          <TouchableOpacity
+            style={styles.changeServerBtn}
+            activeOpacity={0.75}
+            onPress={onOpenServerModal}
+          >
+            <Text style={styles.changeServerBtnText}>📡 Change Backend Host IP & Port</Text>
+          </TouchableOpacity>
+        )}
 
         <View style={styles.healthRow}>
           <Text style={styles.healthLabel}>Telemetry Transmitted:</Text>
@@ -536,6 +560,34 @@ const styles = StyleSheet.create({
     color: "#cbd5e1",
     fontSize: 11,
     fontWeight: "700",
+  },
+  editIpTag: {
+    backgroundColor: "rgba(56, 189, 248, 0.15)",
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+    borderWidth: 1,
+    borderColor: "rgba(56, 189, 248, 0.3)",
+  },
+  editIpTagText: {
+    color: "#38bdf8",
+    fontSize: 9,
+    fontWeight: "700",
+  },
+  changeServerBtn: {
+    backgroundColor: "rgba(56, 189, 248, 0.1)",
+    paddingVertical: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "rgba(56, 189, 248, 0.25)",
+    alignItems: "center",
+    marginTop: 6,
+    marginBottom: 4,
+  },
+  changeServerBtnText: {
+    color: "#38bdf8",
+    fontSize: 11,
+    fontWeight: "800",
   },
   logoutButton: {
     backgroundColor: "rgba(244, 63, 94, 0.12)",

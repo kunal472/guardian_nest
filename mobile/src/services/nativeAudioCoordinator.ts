@@ -2,6 +2,8 @@ import {
   audioResourceCoordinator,
   AudioResourceCoordinator,
   MeteringPayload,
+  NativeDistressPayload,
+  NativeDistressListener,
   SpotterState,
 } from '../../modules/guardian-audio';
 
@@ -26,6 +28,18 @@ class NativeAudioCoordinatorWrapper {
     return this.coordinator.subscribeMetering((payload: MeteringPayload) => {
       listener({ dbfs: payload.dbfs, rms: payload.rms });
     });
+  }
+
+  public subscribeDistressTrigger(listener: NativeDistressListener): () => void {
+    return this.coordinator.subscribeDistressTrigger(listener);
+  }
+
+  public setBackendConfig(url: string, token?: string | null): void {
+    this.coordinator.setBackendConfig(url, token);
+  }
+
+  public setScreamSensitivity(level: string): void {
+    this.coordinator.setScreamSensitivity(level);
   }
 
   public async startContinuousSpotter(): Promise<boolean> {

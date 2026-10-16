@@ -20,7 +20,7 @@ class GuardianAudioModule : Module(), AudioCoordinatorListener {
     override fun definition() = ModuleDefinition {
         Name("GuardianAudio")
 
-        Events("onMeteringUpdate", "onError", "onStateChange")
+        Events("onMeteringUpdate", "onError", "onStateChange", "onNativeDistressTriggered")
 
         OnCreate {
             AudioHardwareCoordinator.listener = this@GuardianAudioModule
@@ -109,6 +109,17 @@ class GuardianAudioModule : Module(), AudioCoordinatorListener {
         Function("getSpotterState") {
             AudioHardwareCoordinator.getState().name
         }
+
+        AsyncFunction("setBackendConfig") { url: String, token: String?, promise: Promise ->
+            GuardianAudioRecordService.targetBackendUrl = url
+            GuardianAudioRecordService.targetAuthToken = token
+            promise.resolve(true)
+        }
+
+        AsyncFunction("setScreamSensitivity") { level: String, promise: Promise ->
+            AudioHardwareCoordinator.screamSensitivity = level
+            promise.resolve(true)
+        }
     }
 
     private fun startServiceInternal() {
@@ -133,6 +144,15 @@ class GuardianAudioModule : Module(), AudioCoordinatorListener {
 
     override fun onMeteringUpdate(dbfs: Double, rms: Double) {
         sendEvent("onMeteringUpdate", mapOf("dbfs" to dbfs, "rms" to rms))
+    }
+
+    override fun onScreamDetected(dbfs: Double, rms: Double) {
+        sendEvent("onNativeDistressTriggered", mapOf(
+            "triggerType" to "AUDIO_SCREAM",
+            "dbfs" to dbfs,
+            "rms" to rms
+        ))
+        GuardianAudioRecordService.instance?.triggerNativeDistressAlarm(dbfs)
     }
 
     override fun onStateChange(state: SpotterState) {

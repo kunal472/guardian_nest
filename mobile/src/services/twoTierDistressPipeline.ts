@@ -76,6 +76,8 @@ class TwoTierDistressPipeline {
   private audioStreamTimer: ReturnType<typeof setInterval> | null = null;
   private unsubWebSpeech: (() => void) | null = null;
   private unsubNativeMetering: (() => void) | null = null;
+  private unsubNativeDistress: (() => void) | null = null;
+  private lastFrameProcessTime: number = 0;
   private listeners: Set<PipelineListener> = new Set();
   private onEmergencyCallback: EmergencyCallback | null = null;
   private isTriggerDebounced: boolean = false;
@@ -146,6 +148,14 @@ class TwoTierDistressPipeline {
     this.telemetry.screamSensitivity = level;
     this.emitState();
     logger.info(`[TwoTierPipeline] Scream Sensitivity updated: ${level} (Thresh=${this.yamnetThreshold.toFixed(2)}, Delta=+${this.screamDeltaDbfs}dB)`);
+
+    if (Platform.OS !== 'web') {
+      try {
+        nativeAudioCoordinator.setScreamSensitivity(level);
+      } catch (err: any) {
+        logger.warn('[TwoTierPipeline] nativeAudioCoordinator.setScreamSensitivity error:', err);
+      }
+    }
   }
 
   public getScreamSensitivity(): ScreamSensitivity {
@@ -177,6 +187,15 @@ class TwoTierDistressPipeline {
   public setDynamicThresholds(yamnetFloor?: number, wakeWordFloor?: number): void {
     if (yamnetFloor !== undefined && yamnetFloor > 0) {
       this.yamnetThreshold = yamnetFloor;
+      const mappedLevel: ScreamSensitivity =
+        yamnetFloor >= 0.85 ? 'LOUD_ONLY' : yamnetFloor <= 0.73 ? 'SENSITIVE' : 'MEDIUM';
+      this.screamSensitivityLevel = mappedLevel;
+      this.telemetry.screamSensitivity = mappedLevel;
+      if (Platform.OS !== 'web') {
+        try {
+          nativeAudioCoordinator.setScreamSensitivity(mappedLevel);
+        } catch (_) {}
+      }
     }
     if (wakeWordFloor !== undefined && wakeWordFloor > 0) {
       this.openWakeWordThreshold = wakeWordFloor;
@@ -246,11 +265,27 @@ class TwoTierDistressPipeline {
     };
     this.emitState();
 
-    // 1. Subscribe to Native Background Audio Stream Telemetry
+    // 1. Subscribe to Native Background Audio Stream Telemetry & Native Distress Triggers
     if (Platform.OS !== 'web') {
+      this.unsubNativeDistress = nativeAudioCoordinator.subscribeDistressTrigger((payload) => {
+        logger.warn(
+          `[TwoTierPipeline] 🚨 Native OS Scream Trigger received: ${payload.reason} (${payload.dbfs.toFixed(1)} dBFS)`
+        );
+        if (!this.isSosActive && !this.isTriggerDebounced) {
+          this.isTriggerDebounced = true;
+          this.handleScreamSpotterEvent(0.95, 'Scream');
+          setTimeout(() => {
+            this.isTriggerDebounced = false;
+          }, 10000);
+        }
+      });
+
       this.unsubNativeMetering = nativeAudioCoordinator.subscribeMetering(
         (event: NativeAudioMeteringEvent) => {
           this.liveMeteringDbfs = event.dbfs;
+          // Event-driven frame processing: ensures acoustic evaluation keeps running
+          // even when JS interval timers are suspended by the OS in background.
+          this.processAcousticFrame(event.dbfs);
         }
       );
       nativeAudioCoordinator.startContinuousSpotter().catch((e) => {
@@ -267,143 +302,155 @@ class TwoTierDistressPipeline {
       this.telemetry.isWebSpeechActive = true;
     }
 
-    // 3. Continuous 16kHz audio stream & Log-Mel spectrogram computation
+    // 3. Fallback continuous timer (vital for web and unit test environments)
     this.audioStreamTimer = setInterval(() => {
       if (!this.isRunning) return;
+      this.processAcousticFrame(this.liveMeteringDbfs);
+    }, 100);
+  }
 
-      const liveMeteringDbfs: number | null = this.liveMeteringDbfs;
-      const now = Date.now();
+  /**
+   * Event-driven acoustic frame processing (callable by native metering events or JS timer fallback)
+   */
+  private processAcousticFrame(liveMeteringDbfs: number | null): void {
+    if (!this.isRunning) return;
 
-      // Continuous ambient noise calibration (moving average during non-speech baseline frames)
-      if (liveMeteringDbfs !== null) {
-        if (this.calibrationFramesCount < 30) {
-          this.calibrationFramesCount++;
-          this.ambientNoiseFloorDbfs = this.ambientNoiseFloorDbfs * 0.85 + liveMeteringDbfs * 0.15;
-        } else if (liveMeteringDbfs < this.ambientNoiseFloorDbfs + 6.0) {
-          // Quiet baseline frame, update noise floor gradually
-          this.ambientNoiseFloorDbfs = this.ambientNoiseFloorDbfs * 0.98 + liveMeteringDbfs * 0.02;
+    const now = Date.now();
+    // Throttle duplicate frame processing between native metering and JS timer
+    if (now - this.lastFrameProcessTime < 70) {
+      return;
+    }
+    this.lastFrameProcessTime = now;
+
+    // Continuous ambient noise calibration (moving average during non-speech baseline frames)
+    if (liveMeteringDbfs !== null) {
+      if (this.calibrationFramesCount < 30) {
+        this.calibrationFramesCount++;
+        this.ambientNoiseFloorDbfs = this.ambientNoiseFloorDbfs * 0.85 + liveMeteringDbfs * 0.15;
+      } else if (liveMeteringDbfs < this.ambientNoiseFloorDbfs + 6.0) {
+        // Quiet baseline frame, update noise floor gradually
+        this.ambientNoiseFloorDbfs = this.ambientNoiseFloorDbfs * 0.98 + liveMeteringDbfs * 0.02;
+      }
+    }
+
+    // Dynamic adaptive thresholds based on ambient room noise and configured sensitivity level
+    const speechFloorDbfs = Math.max(-28.0, this.ambientNoiseFloorDbfs + this.speechDeltaDbfs);
+    const screamFloorDbfs = Math.max(-18.0, this.ambientNoiseFloorDbfs + this.screamDeltaDbfs);
+
+    // Calculate live energy percentage (0 to 100%) from dBFS (-60 to 0)
+    const liveEnergyPercent = liveMeteringDbfs !== null
+      ? Math.min(100, Math.max(3, Math.round(((liveMeteringDbfs + 60) / 60) * 100)))
+      : Math.round(5 + Math.random() * 8);
+
+    // Track continuous high amplitude for Scream Detector (must be >= screamMinFrames frames)
+    if (liveMeteringDbfs !== null && liveMeteringDbfs >= screamFloorDbfs) {
+      this.sustainedHighEnergyFrames++;
+    } else {
+      this.sustainedHighEnergyFrames = Math.max(0, this.sustainedHighEnergyFrames - 2);
+    }
+
+    // Track Vocal Phrase / Cadence Activity for Spoken Keyword ("Help Me" / "Emergency")
+    let detectedSpokenDistress = false;
+    let cadenceBurstMs = 0;
+
+    if (liveMeteringDbfs !== null) {
+      if (liveMeteringDbfs >= speechFloorDbfs) {
+        this.sustainedSpeechFrames++;
+        // If speech is sustained for >= 250ms (3 frames) up to 2.0s without screaming
+        if (this.sustainedSpeechFrames >= 3 && this.sustainedSpeechFrames <= 20) {
+          detectedSpokenDistress = true;
         }
-      }
-
-      // Dynamic adaptive thresholds based on ambient room noise and configured sensitivity level
-      const speechFloorDbfs = Math.max(-28.0, this.ambientNoiseFloorDbfs + this.speechDeltaDbfs);
-      const screamFloorDbfs = Math.max(-18.0, this.ambientNoiseFloorDbfs + this.screamDeltaDbfs);
-
-      // Calculate live energy percentage (0 to 100%) from dBFS (-60 to 0)
-      const liveEnergyPercent = liveMeteringDbfs !== null
-        ? Math.min(100, Math.max(3, Math.round(((liveMeteringDbfs + 60) / 60) * 100)))
-        : Math.round(5 + Math.random() * 8);
-
-      // Track continuous high amplitude for Scream Detector (must be >= screamMinFrames frames)
-      if (liveMeteringDbfs !== null && liveMeteringDbfs >= screamFloorDbfs) {
-        this.sustainedHighEnergyFrames++;
       } else {
-        this.sustainedHighEnergyFrames = Math.max(0, this.sustainedHighEnergyFrames - 2);
+        this.sustainedSpeechFrames = Math.max(0, this.sustainedSpeechFrames - 1);
       }
 
-      // Track Vocal Phrase / Cadence Activity for Spoken Keyword ("Help Me" / "Emergency")
-      let detectedSpokenDistress = false;
-      let cadenceBurstMs = 0;
+      // Syllabic 2-pulse cadence detection
+      if (now - this.lastVocalBurstTime > 1500) {
+        this.vocalBurstCount = 0;
+        this.inAcousticValley = true;
+      }
 
-      if (liveMeteringDbfs !== null) {
-        if (liveMeteringDbfs >= speechFloorDbfs) {
-          this.sustainedSpeechFrames++;
-          // If speech is sustained for >= 250ms (3 frames) up to 2.0s without screaming
-          if (this.sustainedSpeechFrames >= 3 && this.sustainedSpeechFrames <= 20) {
+      if (liveMeteringDbfs < speechFloorDbfs) {
+        this.inAcousticValley = true;
+      } else if (liveMeteringDbfs >= speechFloorDbfs && liveMeteringDbfs < screamFloorDbfs) {
+        if (this.inAcousticValley) {
+          this.inAcousticValley = false;
+          const timeSinceLastBurst = now - this.lastVocalBurstTime;
+          if (this.vocalBurstCount === 0 || timeSinceLastBurst > 1500) {
+            this.vocalBurstCount = 1;
+            this.lastVocalBurstTime = now;
+          } else if (this.vocalBurstCount >= 1 && timeSinceLastBurst >= 180 && timeSinceLastBurst <= 1200) {
+            this.vocalBurstCount = 2;
+            this.lastVocalBurstTime = now;
+            cadenceBurstMs = timeSinceLastBurst;
             detectedSpokenDistress = true;
           }
-        } else {
-          this.sustainedSpeechFrames = Math.max(0, this.sustainedSpeechFrames - 1);
-        }
-
-        // Syllabic 2-pulse cadence detection
-        if (now - this.lastVocalBurstTime > 1500) {
-          this.vocalBurstCount = 0;
-          this.inAcousticValley = true;
-        }
-
-        if (liveMeteringDbfs < speechFloorDbfs) {
-          this.inAcousticValley = true;
-        } else if (liveMeteringDbfs >= speechFloorDbfs && liveMeteringDbfs < screamFloorDbfs) {
-          if (this.inAcousticValley) {
-            this.inAcousticValley = false;
-            const timeSinceLastBurst = now - this.lastVocalBurstTime;
-            if (this.vocalBurstCount === 0 || timeSinceLastBurst > 1500) {
-              this.vocalBurstCount = 1;
-              this.lastVocalBurstTime = now;
-            } else if (this.vocalBurstCount >= 1 && timeSinceLastBurst >= 180 && timeSinceLastBurst <= 1200) {
-              this.vocalBurstCount = 2;
-              this.lastVocalBurstTime = now;
-              cadenceBurstMs = timeSinceLastBurst;
-              detectedSpokenDistress = true;
-            }
-          }
         }
       }
+    }
 
-      // Continuous 16kHz audio stream & Log-Mel spectrogram computation
-      const amplitude = liveMeteringDbfs !== null
-        ? Math.min(1.0, Math.max(0.01, (liveMeteringDbfs + 60) / 60))
-        : 0.02;
+    // Continuous 16kHz audio stream & Log-Mel spectrogram computation
+    const amplitude = liveMeteringDbfs !== null
+      ? Math.min(1.0, Math.max(0.01, (liveMeteringDbfs + 60) / 60))
+      : 0.02;
 
-      const slice = new Float32Array(1600);
-      for (let i = 0; i < 1600; i++) {
-        slice[i] = (Math.random() * 2 - 1) * amplitude;
+    const slice = new Float32Array(1600);
+    for (let i = 0; i < 1600; i++) {
+      slice[i] = (Math.random() * 2 - 1) * amplitude;
+    }
+
+    // Compute WASM 64-bin Mel Spectrogram frames
+    webAudioMlEngine.computeLogMelSpectrogram(slice, 16000, 64);
+
+    this.ringBuffer.push(slice);
+    this.telemetry.ringBufferFill = this.ringBuffer.getFillPercentage();
+    this.telemetry.ringBufferSeconds = this.ringBuffer.getBufferedSeconds();
+    this.telemetry.liveAudioEnergyPercent = liveEnergyPercent;
+    this.telemetry.liveDbfs = liveMeteringDbfs ?? -55.0;
+    this.telemetry.ambientNoiseDbfs = Number(this.ambientNoiseFloorDbfs.toFixed(1));
+    this.telemetry.screamThresholdDbfs = Number(screamFloorDbfs.toFixed(1));
+    this.telemetry.speechThresholdDbfs = Number(speechFloorDbfs.toFixed(1));
+    this.emitState();
+
+    // Guard: Skip triggering if an SOS is already active or during debounce lockout
+    if (this.isSosActive || this.isTriggerDebounced) {
+      return;
+    }
+
+    // Tier 1 Trigger A: Real-Time Acoustic Scream Spotter (>= screamMinFrames consecutive frames >= screamFloorDbfs)
+    if (this.sustainedHighEnergyFrames >= this.screamMinFrames && liveMeteringDbfs !== null) {
+      const calculatedConfidence = Math.min(0.99, Math.max(0.70, 0.78 + (liveMeteringDbfs - screamFloorDbfs) / 15));
+      if (calculatedConfidence >= this.yamnetThreshold) {
+        console.warn(
+          `[TwoTierPipeline] 🚨 SUSTAINED VOCAL SCREAM / DISTRESS DETECTED: ${liveMeteringDbfs.toFixed(1)} dBFS (${(calculatedConfidence * 100).toFixed(0)}% confidence across ${this.sustainedHighEnergyFrames * 100}ms)`,
+        );
+        this.isTriggerDebounced = true;
+        this.sustainedHighEnergyFrames = 0;
+        this.sustainedSpeechFrames = 0;
+        this.vocalBurstCount = 0;
+        this.handleScreamSpotterEvent(calculatedConfidence, 'Scream');
+        setTimeout(() => {
+          this.isTriggerDebounced = false;
+        }, 10000);
       }
-
-      // Compute WASM 64-bin Mel Spectrogram frames
-      webAudioMlEngine.computeLogMelSpectrogram(slice, 16000, 64);
-
-      this.ringBuffer.push(slice);
-      this.telemetry.ringBufferFill = this.ringBuffer.getFillPercentage();
-      this.telemetry.ringBufferSeconds = this.ringBuffer.getBufferedSeconds();
-      this.telemetry.liveAudioEnergyPercent = liveEnergyPercent;
-      this.telemetry.liveDbfs = liveMeteringDbfs ?? -55.0;
-      this.telemetry.ambientNoiseDbfs = Number(this.ambientNoiseFloorDbfs.toFixed(1));
-      this.telemetry.screamThresholdDbfs = Number(screamFloorDbfs.toFixed(1));
-      this.telemetry.speechThresholdDbfs = Number(speechFloorDbfs.toFixed(1));
-      this.emitState();
-
-      // Guard: Skip triggering if an SOS is already active or during debounce lockout
-      if (this.isSosActive || this.isTriggerDebounced) {
-        return;
+    }
+    // Tier 1 Trigger B: Adaptive Spoken Distress Cadence ("Help Me" / "Emergency")
+    else if (detectedSpokenDistress && liveMeteringDbfs !== null && liveMeteringDbfs >= speechFloorDbfs) {
+      const calculatedConfidence = Math.min(0.98, Math.max(0.68, 0.74 + (liveMeteringDbfs - speechFloorDbfs) / 15));
+      if (calculatedConfidence >= this.openWakeWordThreshold) {
+        console.warn(
+          `[TwoTierPipeline] 🗣️ SPOKEN DISTRESS PHRASE DETECTED: ${liveMeteringDbfs.toFixed(1)} dBFS (${(calculatedConfidence * 100).toFixed(0)}% confidence, SpeechFrames=${this.sustainedSpeechFrames})`,
+        );
+        this.isTriggerDebounced = true;
+        this.sustainedHighEnergyFrames = 0;
+        this.sustainedSpeechFrames = 0;
+        this.vocalBurstCount = 0;
+        this.handleWakeWordCadenceEvent('Help Me', calculatedConfidence);
+        setTimeout(() => {
+          this.isTriggerDebounced = false;
+        }, 10000);
       }
-
-      // Tier 1 Trigger A: Real-Time Acoustic Scream Spotter (>= screamMinFrames consecutive frames >= screamFloorDbfs)
-      if (this.sustainedHighEnergyFrames >= this.screamMinFrames && liveMeteringDbfs !== null) {
-        const calculatedConfidence = Math.min(0.99, Math.max(0.70, 0.78 + (liveMeteringDbfs - screamFloorDbfs) / 15));
-        if (calculatedConfidence >= this.yamnetThreshold) {
-          console.warn(
-            `[TwoTierPipeline] 🚨 SUSTAINED VOCAL SCREAM / DISTRESS DETECTED: ${liveMeteringDbfs.toFixed(1)} dBFS (${(calculatedConfidence * 100).toFixed(0)}% confidence across ${this.sustainedHighEnergyFrames * 100}ms)`,
-          );
-          this.isTriggerDebounced = true;
-          this.sustainedHighEnergyFrames = 0;
-          this.sustainedSpeechFrames = 0;
-          this.vocalBurstCount = 0;
-          this.handleScreamSpotterEvent(calculatedConfidence, 'Scream');
-          setTimeout(() => {
-            this.isTriggerDebounced = false;
-          }, 10000);
-        }
-      }
-      // Tier 1 Trigger B: Adaptive Spoken Distress Cadence ("Help Me" / "Emergency")
-      else if (detectedSpokenDistress && liveMeteringDbfs !== null && liveMeteringDbfs >= speechFloorDbfs) {
-        const calculatedConfidence = Math.min(0.98, Math.max(0.68, 0.74 + (liveMeteringDbfs - speechFloorDbfs) / 15));
-        if (calculatedConfidence >= this.openWakeWordThreshold) {
-          console.warn(
-            `[TwoTierPipeline] 🗣️ SPOKEN DISTRESS PHRASE DETECTED: ${liveMeteringDbfs.toFixed(1)} dBFS (${(calculatedConfidence * 100).toFixed(0)}% confidence, SpeechFrames=${this.sustainedSpeechFrames})`,
-          );
-          this.isTriggerDebounced = true;
-          this.sustainedHighEnergyFrames = 0;
-          this.sustainedSpeechFrames = 0;
-          this.vocalBurstCount = 0;
-          this.handleWakeWordCadenceEvent('Help Me', calculatedConfidence);
-          setTimeout(() => {
-            this.isTriggerDebounced = false;
-          }, 10000);
-        }
-      }
-    }, 100);
+    }
   }
 
   /**
@@ -449,6 +496,10 @@ class TwoTierDistressPipeline {
     if (this.unsubNativeMetering) {
       this.unsubNativeMetering();
       this.unsubNativeMetering = null;
+    }
+    if (this.unsubNativeDistress) {
+      this.unsubNativeDistress();
+      this.unsubNativeDistress = null;
     }
     if (this.unsubWebSpeech) {
       this.unsubWebSpeech();

@@ -4,6 +4,7 @@ import {
   Text,
   View,
   TouchableOpacity,
+  ScrollView,
 } from "react-native";
 import { PipelineTelemetry } from "../services/twoTierDistressPipeline";
 import { AudioVaultState } from "../services/hardwareAudioVaultService";
@@ -61,7 +62,12 @@ export const ShieldTab: React.FC<ShieldTabProps> = ({
   onSetDeadmanSeconds,
 }) => {
   return (
-    <View style={styles.container}>
+    <ScrollView
+      style={styles.scrollWrapper}
+      contentContainerStyle={styles.container}
+      showsVerticalScrollIndicator={false}
+      keyboardShouldPersistTaps="handled"
+    >
       {/* Critical Last Gasp Alert Banner */}
       {batteryLevel <= 5 && isSosActive && (
         <View style={styles.lastGaspBanner}>
@@ -380,13 +386,18 @@ export const ShieldTab: React.FC<ShieldTabProps> = ({
           </View>
         )}
       </View>
-    </View>
+    </ScrollView>
   );
 };
 
 const styles = StyleSheet.create({
+  scrollWrapper: {
+    flex: 1,
+  },
   container: {
-    paddingBottom: 16,
+    paddingHorizontal: 16,
+    paddingTop: 4,
+    paddingBottom: 48,
   },
   sectionHeader: {
     fontSize: 14,

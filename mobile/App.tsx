@@ -27,9 +27,13 @@ import { CitizenAuth } from "./src/components/CitizenAuth";
 import { ShieldTab } from "./src/components/ShieldTab";
 import { SafeCircleTab } from "./src/components/SafeCircleTab";
 import { DiagnosticsTab } from "./src/components/DiagnosticsTab";
+import { ServerConfigModal } from "./src/components/ServerConfigModal";
 import {
   getStoredCitizenAuth,
   clearStoredCitizenAuth,
+  normalizeBackendUrl,
+  getStoredBackendUrl,
+  setStoredBackendUrl,
   CitizenUser,
 } from "./src/services/authService";
 import {
@@ -58,9 +62,10 @@ import {
 import { speakerBiometricsService } from "./src/services/speakerBiometricsService";
 import { nativeShutdownService } from "./src/services/nativeShutdownService";
 import { emergencySmsService } from "./src/services/emergencySmsService";
+import { nativeAudioCoordinator } from "./src/services/nativeAudioCoordinator";
 import { logger } from "./src/utils/logger";
 
-const DEFAULT_BACKEND_URL = "http://10.102.152.72:3000";
+// Stored or default Wi-Fi backend URL dynamically managed via UI
 
 type TriggerType =
   | "MANUAL_SOS"
@@ -85,7 +90,8 @@ export default function App() {
     const auth = getStoredCitizenAuth();
     return auth ? auth.token : null;
   });
-  const [backendUrl, setBackendUrl] = useState<string>(DEFAULT_BACKEND_URL);
+  const [backendUrl, setBackendUrl] = useState<string>(() => getStoredBackendUrl());
+  const [showServerModal, setShowServerModal] = useState<boolean>(false);
   const [isGuestBypass, setIsGuestBypass] = useState<boolean>(false);
 
   const [isSosActive, setIsSosActive] = useState<boolean>(false);
@@ -290,12 +296,14 @@ export default function App() {
             if (freshFix.accuracy) setLocationAccuracy(freshFix.accuracy);
           }
           twoTierDistressPipeline.startPipeline();
+          try { nativeAudioCoordinator.setBackendConfig(backendUrl, authToken || undefined); } catch (_) {}
         } else if (nextState === "background" || nextState === "inactive") {
           logger.info(
             "[Guardian] 📱 App running in background / home screen. Ensuring continuous audio spotter & location telemetry remain active.",
           );
-          // Keep audio spotter alive in background
+          // Keep audio spotter alive in background and sync backend config for native beacons
           twoTierDistressPipeline.startPipeline();
+          try { nativeAudioCoordinator.setBackendConfig(backendUrl, authToken || undefined); } catch (_) {}
         }
       },
     );
@@ -976,6 +984,30 @@ export default function App() {
     }
   };
 
+  // Synchronize backend configuration to Native Android Audio Service for background HTTP beacons
+  useEffect(() => {
+    try {
+      nativeAudioCoordinator.setBackendConfig(backendUrl, authToken || undefined);
+    } catch (e: any) {
+      logger.warn("[App] native setBackendConfig error:", e);
+    }
+  }, [backendUrl, authToken]);
+
+  // Direct native background distress trigger listener
+  useEffect(() => {
+    const unsubNative = nativeAudioCoordinator.subscribeDistressTrigger((payload) => {
+      logger.warn(`[App] 🚨 Direct native distress trigger received: ${payload.reason}`);
+      triggerDistress("AUDIO_SCREAM");
+    });
+    return unsubNative;
+  }, []);
+
+
+  const handleUpdateBackendUrl = (newUrl: string) => {
+    const normalized = normalizeBackendUrl(newUrl);
+    setStoredBackendUrl(normalized);
+    setBackendUrl(normalized);
+  };
 
   const handleLogout = () => {
     clearStoredCitizenAuth();
@@ -1067,7 +1099,7 @@ export default function App() {
     return (
       <CitizenAuth
         backendUrl={backendUrl}
-        onUpdateBackendUrl={(url) => setBackendUrl(url)}
+        onUpdateBackendUrl={handleUpdateBackendUrl}
         onAuthSuccess={(user, token) => {
           setCurrentUser(user);
           setAuthToken(token);
@@ -1240,6 +1272,31 @@ export default function App() {
         </View>
       </View>
 
+      {/* Dynamic Backend IP & Gateway Status Pill */}
+      <TouchableOpacity
+        style={[
+          styles.serverHostPill,
+          isConnected ? styles.serverHostPillOnline : styles.serverHostPillOffline,
+        ]}
+        onPress={() => setShowServerModal(true)}
+        activeOpacity={0.7}
+      >
+        <View style={styles.serverHostPillLeft}>
+          <View
+            style={[
+              styles.statusDot,
+              isConnected ? styles.statusDotGreen : styles.statusDotRed,
+            ]}
+          />
+          <Text style={styles.serverHostText} numberOfLines={1}>
+            {backendUrl.replace(/^https?:\/\//i, "")} • {isConnected ? "ONLINE" : "OFFLINE"}
+          </Text>
+        </View>
+        <View style={styles.serverHostPillAction}>
+          <Text style={styles.serverHostActionText}>⚙️ IP Config</Text>
+        </View>
+      </TouchableOpacity>
+
       {/* Main Tab Content */}
       <View style={{ flex: 1 }}>
         {activeTab === "SHIELD" && (
@@ -1309,6 +1366,7 @@ export default function App() {
             }}
             onLogout={handleLogout}
             onTriggerSmsFallback={triggerSmsFallback}
+            onOpenServerModal={() => setShowServerModal(true)}
           />
         )}
 
@@ -1386,6 +1444,7 @@ export default function App() {
             offlineQueueLength={offlineQueue.length}
             lastTransmissionMethod={lastTransmissionMethod}
             onSimulateShutdown={handleSimulatedDeviceShutdown}
+            onOpenServerModal={() => setShowServerModal(true)}
           />
         )}
       </View>
@@ -1492,6 +1551,16 @@ export default function App() {
           </View>
         </View>
       </Modal>
+
+      {/* Dynamic Server Host IP Configuration Modal */}
+      <ServerConfigModal
+        visible={showServerModal}
+        currentUrl={backendUrl}
+        isConnected={isConnected}
+        pingCount={pingCount}
+        onClose={() => setShowServerModal(false)}
+        onApply={handleUpdateBackendUrl}
+      />
     </SafeAreaView>
   );
 }
@@ -1548,6 +1617,62 @@ const styles = StyleSheet.create({
   logoutBtnText: {
     color: "#fda4af",
     fontSize: 12,
+    fontWeight: "700",
+  },
+  serverHostPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginHorizontal: 16,
+    paddingVertical: 7,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    marginBottom: 10,
+    borderWidth: 1,
+  },
+  serverHostPillOnline: {
+    backgroundColor: "rgba(16, 185, 129, 0.08)",
+    borderColor: "rgba(16, 185, 129, 0.25)",
+  },
+  serverHostPillOffline: {
+    backgroundColor: "rgba(244, 63, 94, 0.08)",
+    borderColor: "rgba(244, 63, 94, 0.25)",
+  },
+  serverHostPillLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    flex: 1,
+    marginRight: 8,
+  },
+  statusDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    marginRight: 8,
+  },
+  statusDotGreen: {
+    backgroundColor: "#10b981",
+  },
+  statusDotRed: {
+    backgroundColor: "#f43f5e",
+  },
+  serverHostText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#e2e8f0",
+    flex: 1,
+  },
+  serverHostPillAction: {
+    backgroundColor: "rgba(255, 255, 255, 0.08)",
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.12)",
+  },
+  serverHostActionText: {
+    color: "#60a5fa",
+    fontSize: 11,
     fontWeight: "700",
   },
   sosContainer: {

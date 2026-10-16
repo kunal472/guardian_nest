@@ -50,6 +50,7 @@ export interface DiagnosticsTabProps {
   offlineQueueLength: number;
   lastTransmissionMethod: string;
   onSimulateShutdown: () => void;
+  onOpenServerModal?: () => void;
 }
 
 export const DiagnosticsTab: React.FC<DiagnosticsTabProps> = ({
@@ -91,6 +92,7 @@ export const DiagnosticsTab: React.FC<DiagnosticsTabProps> = ({
   offlineQueueLength,
   lastTransmissionMethod,
   onSimulateShutdown,
+  onOpenServerModal,
 }) => {
   return (
     <ScrollView
@@ -780,6 +782,44 @@ export const DiagnosticsTab: React.FC<DiagnosticsTabProps> = ({
         </View>
       </View>
 
+      {/* Backend Host Gateway IP Configuration */}
+      <View style={styles.card}>
+        <View style={styles.cardHeaderRow}>
+          <Text style={styles.cardTitle}>Backend Host Gateway IP</Text>
+          <Text
+            style={{
+              fontSize: 11,
+              fontWeight: "700",
+              color: isConnected ? "#10b981" : "#ef4444",
+            }}
+          >
+            {isConnected ? "🟢 ONLINE" : "🔴 OFFLINE"}
+          </Text>
+        </View>
+
+        <View style={styles.rowBetween}>
+          <Text style={styles.metaLabel}>Current Host IP:</Text>
+          <Text style={[styles.metaValue, { fontSize: 11 }]}>{backendUrl}</Text>
+        </View>
+
+        <View style={styles.rowBetween}>
+          <Text style={styles.metaLabel}>Telemetry Transmitted:</Text>
+          <Text style={styles.metaValue}>{pingCount} updates</Text>
+        </View>
+
+        {onOpenServerModal && (
+          <TouchableOpacity
+            style={[styles.actionBtn, styles.actionBtnBlue, { marginTop: 8 }]}
+            activeOpacity={0.8}
+            onPress={onOpenServerModal}
+          >
+            <Text style={[styles.actionBtnText, { color: "#38bdf8" }]}>
+              ⚙️ Change Backend Host IP & Port
+            </Text>
+          </TouchableOpacity>
+        )}
+      </View>
+
       {/* Network Fault Injection & Resiliency Testing */}
       <View style={styles.card}>
         <Text style={styles.cardTitle}>Network Resiliency & Fault Injection</Text>
@@ -979,6 +1019,10 @@ const styles = StyleSheet.create({
   actionBtnRed: {
     backgroundColor: "rgba(239, 68, 68, 0.15)",
     borderColor: "rgba(239, 68, 68, 0.4)",
+  },
+  actionBtnBlue: {
+    backgroundColor: "rgba(56, 189, 248, 0.15)",
+    borderColor: "rgba(56, 189, 248, 0.4)",
   },
   actionBtnText: {
     color: "#f8fafc",

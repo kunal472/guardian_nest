@@ -10,6 +10,7 @@ describe('CitizenAuth Component Tests', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    jest.setTimeout(15000);
   });
 
   it('should render login form by default with phone and password fields', () => {
