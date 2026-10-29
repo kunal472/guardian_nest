@@ -138,6 +138,15 @@ bun install
 bun run start
 ```
 - Press `a` to launch on Android Device / Emulator, `w` for Web fallback, or scan the QR code via Expo Go / Custom Dev Client.
+- Connect to your local dev machine via the in-app **Server Config Modal** (`10.0.2.2:4000` for Android emulator, or your Wi-Fi LAN IP for physical phones).
+
+### 6. Run Automated Test Suites
+
+```bash
+cd mobile
+bun run test   # or: npx jest --maxWorkers=2
+```
+- Executes **15 test suites** and **97 automated unit & integration tests** across services, components, biometrics, audio, and network fallbacks.
 
 ---
 
@@ -145,11 +154,18 @@ bun run start
 
 1. **NestJS Fastify Adapter**: Ultra-high throughput REST API (`/api/auth`, `/api/users`, `/api/volunteers`, `/api/incidents`) with multipart audio upload handling.
 2. **Dual-API Design**: Clean REST API for Edge mobile devices + GraphQL endpoint (`/graphql`) for administrative reporting.
-3. **Two-Tier Acoustic ML Pipeline**: Energy-efficient noise floor calibration, keyword spotting (`openWakeWord`), deep acoustic classification (`YAMNet` / Whisper.cpp), and speaker biometrics.
-4. **Hardware Snatch & Battery Telemetry**: Real-time accelerometer anomaly detection and battery drain monitoring.
-5. **Dynamic Location Throttling**:
-   - **Active SOS**: 1 ping / second over Socket.io.
-   - **Database Insertion Throttle**: 1 write every 2 seconds to PostgreSQL per incident to protect database performance.
-   - **Standby Mode**: 1 ping / 10 seconds.
-6. **Redis Geospatial Indexing**: Uses `GEOADD` and `GEOSEARCH` on `volunteers:active_locations` to alert community sentinels within 500m in `< 1ms`.
-7. **Decoy Calculator UI**: Stealth Mode disguises the app as a standard calculator with duress PIN switching.
+3. **Native Android Background Acoustic Sentinel**: Android Foreground Service with a `PARTIAL_WAKE_LOCK` (`GuardianAudioRecordService.kt`) maintaining a 16kHz PCM audio thread (`AudioHardwareCoordinator.kt`) even when the screen is locked, preventing OS suspension of JavaScript timers.
+4. **Autonomous Emergency HTTP Beacon**: On scream detection while in the background, native Kotlin directly dispatches an asynchronous HTTP POST beacon to `/api/incidents`, triggers native haptics (`Vibrator`), raises a priority heads-up alert, and brings `MainActivity` to the foreground.
+5. **Real-Time Control Plane <-> Native Sentinel Bridge**: Dynamic synchronization between React Native and Kotlin for sensitivity presets (`LOUD_ONLY`, `MEDIUM`, `SENSITIVE`), numeric ML weights (`0.70` - `0.90`), and backend server URLs in real-time (<1ms).
+6. **Two-Tier Acoustic ML Pipeline**: Energy-efficient noise floor calibration, keyword spotting (`openWakeWord`), deep acoustic classification (`YAMNet` / Whisper.cpp), and 3-step live speaker biometrics.
+7. **Citizen UI & Scrollable Viewports**: Polished non-developer interface (`ShieldTab`, `SafeCircleTab`, `DiagnosticsTab`, `ServerConfigModal`) with `<ScrollView>` integration to prevent UI clipping on small devices.
+8. **Dynamic LAN / Wi-Fi Server IP Config**: In-app modal with quick presets (`10.0.2.2:4000`, `192.168.1.X:4000`, `localhost:4000`) for seamless cross-device mobile testing without rebuilding APKs.
+9. **Hardware Snatch & Battery Telemetry**: Real-time accelerometer anomaly detection (`hardwareSnatchService`) and pre-shutdown emergency dispatch.
+10. **Dynamic Location Throttling**:
+    - **Active SOS**: 1 ping / second over Socket.io.
+    - **Database Insertion Throttle**: 1 write every 2 seconds to PostgreSQL per incident to protect database performance.
+    - **Standby Mode**: 1 ping / 10 seconds.
+11. **Redis Geospatial Indexing**: Uses `GEOADD` and `GEOSEARCH` on `volunteers:active_locations` to alert community sentinels within 500m in `< 1ms`.
+12. **Realistic Decoy Calculator UI**: Stealth Mode disguises the app as a standard system calculator with decimal arithmetic operations (`+`, `-`, `×`, `÷`, `%`, `±`) and duress PIN switching.
+13. **Automated Dead Man's Switch**: Configurable countdown timer with automatic distress escalation upon timeout.
+14. **Emergency Contact Location Alerts & SMS Fallback**: Dispatches incident location to emergency contacts with client-side SMS intent fallback for offline environments.

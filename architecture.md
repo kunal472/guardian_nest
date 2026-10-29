@@ -61,7 +61,10 @@ Built with **React Native (v0.86.3)** and **Expo (SDK ~57)** with custom native 
 
 - **Local Edge Intelligence**:
   - **Two-Tier Distress Pipeline**: Combines continuous lightweight DBFS noise floor metering, keyword spotting (`openWakeWord`), acoustic classification (`YAMNet` / Whisper.cpp), and speaker biometrics.
-  - **Acoustic Vault & Native Module (`guardian-audio`)**: C++/JNI native audio coordinator buffering raw PCM audio into an encrypted hardware vault. Audio analysis happens on-device; raw audio never leaves unless an active SOS is triggered.
+  - **Native Android Background Sentinel (`guardian-audio`)**: Runs an Android Foreground Service with a `PARTIAL_WAKE_LOCK` (`GuardianAudioRecordService.kt`), keeping a continuous 16kHz PCM audio thread (`AudioHardwareCoordinator.kt`) active even when the phone is locked or minimized, overcoming the OS suspension of JavaScript timers.
+  - **Autonomous Native Distress Dispatch**: On background scream detection, Kotlin natively activates `Vibrator` haptics, raises a high-priority heads-up notification, brings `MainActivity` to the foreground (`FLAG_ACTIVITY_REORDER_TO_FRONT`), and dispatches a direct HTTP POST beacon to `/api/incidents` without requiring React Native to be awake.
+  - **Dynamic Configuration Bridge**: Real-time two-way synchronization between React Native (Control Plane) and Kotlin (Execution Plane) for sensitivity presets (`LOUD_ONLY`, `MEDIUM`, `SENSITIVE`), numeric ML weights (`0.70` - `0.90`), and backend server URLs in <1ms without service restarts.
+  - **Acoustic Vault & Native Module**: C++/JNI native audio coordinator buffering raw PCM audio into an encrypted hardware vault. Audio analysis happens on-device; raw audio never leaves unless an active SOS is triggered.
   - **Hardware Snatch Detection**: Uses accelerometer sensors (`expo-sensors` / hardware snatch service) to detect abrupt physical removal signatures.
 - **Publishing Events**:
   - Emits `distress:triggered` with GPS coordinates, trigger type, and battery telemetry when SOS conditions are met.
@@ -69,6 +72,7 @@ Built with **React Native (v0.86.3)** and **Expo (SDK ~57)** with custom native 
 - **Subscribing to Events**:
   - Subscribes to `nearby:broadcast` to alert the user if they are an active volunteer sentinel within 500m of an emergency.
   - Subscribes to `events.responder.status_change` to receive live dispatch notifications and estimated arrival times.
+  - Subscribes to `events.system.configuration_update` / `system:config_update` to receive live ML sensitivity weight adjustments from the Admin Dashboard.
 
 ### B. Emergency Responder Tactical Dashboard (`/dashboards/responder_dashboard`)
 Built with **React 19**, **Vite 8**, and **Leaflet Maps**:

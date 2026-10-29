@@ -8,7 +8,7 @@ This document provides a comprehensive specification of the Frontend application
 
 Project Guardian consists of three specialized frontend interfaces:
 
-1. **Mobile Edge Client (`/mobile`)**: React Native app built with Expo (SDK 57) and React 19, targeting Android, iOS, and Web. Handles zero-touch trigger processing, C++/JNI native audio buffering (`guardian-audio`), acoustic scream detection, hardware snatch accelerometry, live GPS location streaming with dynamic battery throttling, emergency SMS fallback, and emergency state transitions.
+1. **Mobile Edge Client (`/mobile`)**: React Native app built with Expo (SDK 57) and React 19, targeting Android, iOS, and Web. Incorporates a dedicated Citizen-focused mobile UI (`ShieldTab`, `SafeCircleTab`, `DiagnosticsTab`), a native Android Kotlin foreground service sentinel (`guardian-audio`) with `PARTIAL_WAKE_LOCK` for non-stop background acoustic monitoring, autonomous native HTTP beaconing, dynamic Wi-Fi/LAN IP configuration, C++/JNI native audio buffering, acoustic scream detection, hardware snatch accelerometry, live GPS location streaming with dynamic battery throttling, emergency SMS fallback, and stealth decoy calculator transitions.
 2. **Emergency Responder Dashboard (`/dashboards/responder_dashboard`)**: React 19 + Vite 8 SPA for dispatchers and field responders. Subscribes to real-time distress alerts via Socket.io, renders live Leaflet interactive maps with GPS breadcrumbs, and manages incident dispatch statuses.
 3. **Admin Dashboard (`/dashboards/admin_dashboard`)**: React 19 + Vite 8 SPA for system administrators. Interfaces with the GraphQL API (`/graphql`) to run analytical queries on users, volunteers, and historical incidents, and broadcasts dynamic system config updates.
 
@@ -28,29 +28,41 @@ mobile/
 ├── assets/
 │   └── models/                      # Downloaded lightweight ML models (YAMNet, Whisper)
 ├── modules/
-│   └── guardian-audio/              # Custom native C++/Android TurboModule for audio vault & metering
-│       ├── android/                 # Native Kotlin/C++ JNI implementations
+│   └── guardian-audio/              # Custom native Android TurboModule for background audio & metering
+│       ├── android/src/main/java/expo/modules/guardianaudio/
+│       │   ├── AudioHardwareCoordinator.kt   # 16kHz PCM AudioRecord worker loop & native scream detector
+│       │   ├── GuardianAudioRecordService.kt # Android Foreground Service with PARTIAL_WAKE_LOCK & HTTP beacon
+│       │   └── GuardianAudioModule.kt        # Expo Module bridge & event dispatcher
 │       ├── index.ts                 # TypeScript coordinator & permission checks
 │       └── package.json
 ├── src/
-│   ├── components/                  # UI widgets (SOS button, decoy calculator, telemetry badges)
+│   ├── components/                  # User-Facing Citizen UI Components
+│   │   ├── CitizenAuth.tsx          # Login & registration modal with demo shortcuts
+│   │   ├── ShieldTab.tsx            # Main distress dashboard (Scrollable SOS cockpit & safe-words)
+│   │   ├── SafeCircleTab.tsx        # Emergency contacts & proximity sentinel mesh controls
+│   │   ├── DiagnosticsTab.tsx       # Live hardware telemetry, audio metering & biometric calibration
+│   │   └── ServerConfigModal.tsx    # Dynamic LAN/Wi-Fi backend IP configuration modal
 │   ├── services/                    # Decoupled singleton services
 │   │   ├── audioRingBuffer.ts       # In-memory circular buffer for audio chunks
-│   │   ├── authService.ts           # JWT authentication, session caching & user profile
+│   │   ├── authService.ts           # JWT authentication, session caching, user profile & backend URL storage
 │   │   ├── emergencySmsService.ts   # Smart SMS fallback generator for offline scenarios
 │   │   ├── hardwareAudioVaultService.ts # Encrypted audio chunk storage & AES-256 vault
 │   │   ├── hardwareBatteryService.ts    # Battery level & charging state listener
 │   │   ├── hardwareLocationService.ts   # GPS tracking & dynamic throttling coordinator
 │   │   ├── hardwareSnatchService.ts     # Accelerometer device snatch anomaly detection
-│   │   ├── nativeAudioCoordinator.ts    # Bridge to guardian-audio native module
+│   │   ├── nativeAudioCoordinator.ts    # Bridge to guardian-audio native module (config & sensitivity sync)
 │   │   ├── nativeShutdownService.ts     # Native shutdown prevention / anti-tamper triggers
 │   │   ├── openWakeWordService.ts       # On-device keyword spotting listener
 │   │   ├── screamDetectionService.ts    # YAMNet acoustic scream & distress classifier
 │   │   ├── speakerBiometricsService.ts  # Voice print comparison & verification
-│   │   ├── twoTierDistressPipeline.ts   # Orchestrates noise floor -> keyword -> acoustic pipeline
+│   │   ├── twoTierDistressPipeline.ts   # Event-driven Two-Tier acoustic distress pipeline
 │   │   └── webAudioMlEngine.ts          # Web Audio fallback for browser execution
-│   └── utils/
-├── App.tsx                          # Root application container & stealth decoy toggle
+│   └── utils/                       # Logging & helper utilities
+├── __tests__/                       # Comprehensive Jest Test Suites (15 suites / 97 tests)
+│   ├── components/                  # CitizenAuth, ShieldTab, SafeCircleTab, DiagnosticsTab, ServerConfigModal
+│   ├── integration/                 # Socket.IO & REST API integration tests
+│   └── unit/                        # Services, RingBuffer, Location, Biometrics, Battery, Snatch, Pipeline
+├── App.tsx                          # Root application container & realistic stealth calculator decoy
 ├── app.json                         # Expo configuration, plugins & Android permissions
 ├── package.json                     # Project scripts & dependencies
 └── tsconfig.json
@@ -101,6 +113,40 @@ mobile/
 The mobile client streams coordinates to the backend Socket.IO gateway using dynamic throttling to balance battery conservation with tactical precision:
 * **Active SOS State**: 1 ping / second (high frequency during ongoing distress).
 * **Standby / Normal State**: 1 ping / 10 seconds (low battery overhead).
+
+### E. Native Android Kotlin Background Sentinel (`guardian-audio`)
+When the app is minimized, sent to the background, or when the screen is locked, mobile OS kernels (specifically Android with Hermes) suspend JavaScript `setInterval` timers. To ensure that distress detection never freezes or seizes, acoustic analysis is executed directly inside native Kotlin:
+* **Continuous 16kHz PCM Audio Stream**: `AudioHardwareCoordinator.kt` runs an asynchronous coroutine worker polling `AudioRecord` at 16,000Hz (100ms / 1,600-sample chunks).
+* **Android Foreground Service (`GuardianAudioRecordService.kt`)**: Runs with a `PARTIAL_WAKE_LOCK` and persistent notification, ensuring the CPU and audio hardware never sleep.
+* **Autonomous Native Alarm**: When a sustained acoustic scream is detected in the background:
+  1. Activates native device vibration patterns via Android `Vibrator`.
+  2. Upgrades notification into a high-priority heads-up emergency alert banner.
+  3. Dispatches an autonomous native HTTP POST beacon directly to `${targetBackendUrl}/api/incidents` using `HttpURLConnection` (bypassing JavaScript completely).
+  4. Brings `MainActivity` to the foreground with `FLAG_ACTIVITY_NEW_TASK | FLAG_ACTIVITY_REORDER_TO_FRONT`.
+  5. Emits `onNativeDistressTriggered` to React Native for full UI escalation.
+
+### F. Control Plane (React Native) <-> Execution Plane (Kotlin) Synchronization
+The architecture maintains a strict separation:
+* **React Native (Control Plane)**: The single source of truth for user settings, backend IPs, and Admin Panel WebSocket configuration broadcasts.
+* **Kotlin (Execution Plane)**: Maintains reactive companion variables updated in under 1ms without service restarts:
+  * **Scream Sensitivity**: Updates via `setScreamSensitivity()`. Kotlin dynamically evaluates both label presets (`LOUD_ONLY`, `MEDIUM`, `SENSITIVE`) and raw numeric confidence floats (`0.70` - `0.90`) on every 100ms audio frame.
+  * **Admin Panel ML Weights**: Real-time broadcasts (`events.system.configuration_update`) received over Socket.IO immediately update native thresholds.
+  * **Backend Server IP & Auth Token**: Synced via `setBackendConfig(url, token)`. If the user or developer updates the Wi-Fi IP in `ServerConfigModal.tsx`, the native HTTP beacon immediately targets the new address.
+  * **AppState Lifecycle Hooks**: Re-syncs the active backend configuration on every foreground/background transition.
+
+### G. Responsive Citizen UI & Scrollable Viewports
+The mobile client is optimized for citizens and non-developers:
+* **Zero Clipping with ScrollView**: `ShieldTab.tsx` and `ServerConfigModal.tsx` are wrapped in `<ScrollView>` containers with `keyboardShouldPersistTaps="handled"` and `showsVerticalScrollIndicator={false}`, ensuring full accessibility on compact mobile viewports and when soft keyboards open.
+* **Tabs Breakdown**:
+  * **ShieldTab**: Emergency SOS button, stealth mode toggle, safe-word guidance, status cards, and sensitivity selectors.
+  * **SafeCircleTab**: Emergency contacts manager and Sentinel Mesh volunteer toggle.
+  * **DiagnosticsTab**: Real-time hardware sensor status (Mic, GPS, Battery, Snatch) and interactive 3-step voice biometric calibration.
+  * **ServerConfigModal**: Quick network presets (`10.0.2.2:4000`, `192.168.1.X:4000`, `localhost:4000`) and custom IP/port configuration for cross-device LAN testing.
+
+### H. Realistic Stealth Calculator Decoy
+* Disguises the application as a realistic, standard system calculator.
+* Implements full decimal arithmetic (`+`, `-`, `×`, `÷`, `%`, `±`), dynamic state buffering, and error handling.
+* Secret duress PIN triggers silent SOS or restores the Guardian Cockpit without alerting potential aggressors.
 
 ---
 
@@ -213,3 +259,31 @@ cd ../../mobile
 bun install
 bun run start
 ```
+
+---
+
+## 6. Testing & Quality Assurance
+
+The mobile edge client includes a comprehensive test suite across unit, integration, and UI component layers:
+
+```bash
+cd mobile
+bun run test   # or: npx jest --maxWorkers=2
+```
+
+### Test Coverage Summary:
+* **15 Test Suites, 97 Passing Tests**:
+  * `ServerConfigModal.test.tsx`: Validates IP address inputs, quick presets, error states, and modal visibility.
+  * `CitizenAuth.test.tsx`: Validates login, registration, validation errors, and guest access.
+  * `ShieldTab.test.tsx`: Validates SOS trigger activation, safe-word guidance, status cards, and sensitivity changes.
+  * `SafeCircleTab.test.tsx`: Tests contact list rendering, add/delete contact flows, and volunteer mesh toggles.
+  * `DiagnosticsTab.test.tsx`: Verifies live sensor readings, battery status, and 3-step voice calibration prompts.
+  * `twoTierDistressPipeline.test.ts`: Verifies threshold tuning, preemption pausing, acoustic event processing, and native spotter listeners.
+  * `hardwareLocationService.test.ts`: Tests GPS permission requests, mock position stream, and haversine calculations.
+  * `hardwareBatteryService.test.ts`: Tests battery telemetry, low-power mode, and critical battery event dispatch.
+  * `hardwareSnatchService.test.ts`: Tests accelerometer thresholds and snatch anomaly triggering.
+  * `speakerBiometricsService.test.ts`: Verifies 16-D voice embedding comparison, Euclidean distance, and cosine similarity scoring.
+  * `authService.test.ts`: Tests token storage, session caching, and IP normalization.
+  * `emergencySmsService.test.ts`: Tests SMS text compression, coordinates formatting, and fallback logic.
+  * `audioRingBuffer.test.ts`: Validates circular PCM buffer, contiguous window retrieval, and memory safety.
+  * `socketIntegration.test.ts` & `restApiIntegration.test.ts`: Validates event bus payloads, authentication headers, and REST fallbacks.
